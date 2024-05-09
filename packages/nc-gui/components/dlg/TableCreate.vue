@@ -1,19 +1,4 @@
 <script setup lang="ts">
-import {
-  Form,
-  TabType,
-  computed,
-  nextTick,
-  onMounted,
-  ref,
-  useBase,
-  useTableNew,
-  useTablesStore,
-  useTabs,
-  useVModel,
-  validateTableName,
-} from '#imports'
-
 const props = defineProps<{
   modelValue: boolean
   sourceId: string
@@ -30,7 +15,7 @@ const inputEl = ref<HTMLInputElement>()
 
 const { addTab } = useTabs()
 
-const { isMysql, isMssql, isPg } = useBase()
+const { isMysql, isMssql, isPg, isSnowflake } = useBase()
 
 const { loadProjectTables, addTable } = useTablesStore()
 
@@ -139,13 +124,13 @@ onMounted(() => {
   <NcModal v-model:visible="dialogShow" :header="$t('activity.createTable')" size="small" @keydown.esc="dialogShow = false">
     <template #header>
       <div class="flex flex-row items-center gap-x-2">
-        <GeneralIcon icon="table" />
+        <GeneralIcon icon="table" class="!text-gray-600/75" />
         {{ $t('activity.createTable') }}
       </div>
     </template>
     <div class="flex flex-col mt-2">
       <a-form :model="table" name="create-new-table-form" @keydown.enter="_createTable" @keydown.esc="dialogShow = false">
-        <a-form-item v-bind="validateInfos.title">
+        <a-form-item v-bind="validateInfos.title" :class="{ '!mb-1': isSnowflake(props.sourceId) }">
           <a-input
             ref="inputEl"
             v-model:value="table.title"
@@ -155,6 +140,9 @@ onMounted(() => {
             :placeholder="$t('msg.info.enterTableName')"
           />
         </a-form-item>
+        <template v-if="isSnowflake(props.sourceId)">
+          <a-checkbox v-model:checked="table.is_hybrid" class="!flex flex-row items-center"> Hybrid Table </a-checkbox>
+        </template>
         <div class="nc-table-advanced-options" :class="{ active: isAdvanceOptVisible }">
           <div>
             <div class="mb-1">

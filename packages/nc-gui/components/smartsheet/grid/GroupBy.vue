@@ -1,19 +1,16 @@
 <script lang="ts" setup>
 import tinycolor from 'tinycolor2'
-import dayjs from 'dayjs'
-import { UITypes, dateFormats, timeFormats } from 'nocodb-sdk'
+import { UITypes, dateFormats, parseStringDateTime, timeFormats } from 'nocodb-sdk'
 import Table from './Table.vue'
 import GroupBy from './GroupBy.vue'
 import GroupByTable from './GroupByTable.vue'
 import GroupByLabel from './GroupByLabel.vue'
-import { GROUP_BY_VARS, computed, ref } from '#imports'
-import type { Group, Row } from '#imports'
 
 const props = defineProps<{
   group: Group
 
   loadGroups: (params?: any, group?: Group) => Promise<void>
-  loadGroupData: (group: Group, force?: boolean) => Promise<void>
+  loadGroupData: (group: Group, force?: boolean, params?: any) => Promise<void>
   loadGroupPage: (group: Group, p: number) => Promise<void>
   groupWrapperChangePage: (page: number, groupWrapper?: Group) => Promise<void>
 
@@ -37,6 +34,16 @@ const vGroup = useVModel(props, 'group', emits)
 const { isViewDataLoading, isPaginationLoading } = storeToRefs(useViewsStore())
 
 const reloadViewDataHook = inject(ReloadViewDataHookInj, createEventHook())
+
+const _loadGroupData = async (group: Group, force?: boolean, params?: any) => {
+  isViewDataLoading.value = true
+  isPaginationLoading.value = true
+
+  await props.loadGroupData(group, force, params)
+
+  isViewDataLoading.value = false
+  isPaginationLoading.value = false
+}
 
 const _depth = props.depth ?? 0
 
@@ -68,12 +75,12 @@ const findAndLoadSubGroup = (key: any) => {
   if (key.length > 0 && vGroup.value.children) {
     if (!oldActiveGroups.value.includes(key[key.length - 1])) {
       const k = key[key.length - 1].replace('group-panel-', '')
-      const grp = vGroup.value.children[k]
+      const grp = vGroup.value.children.find((g) => `${g.key}` === k)
       if (grp) {
         if (grp.nested) {
           if (!grp.children?.length) props.loadGroups({}, grp)
         } else {
-          if (!grp.rows?.length) props.loadGroupData(grp)
+          if (!grp.rows?.length || grp.count !== grp.rows?.length) _loadGroupData(grp)
         }
       }
     }
@@ -81,39 +88,39 @@ const findAndLoadSubGroup = (key: any) => {
   oldActiveGroups.value = key
 }
 
-const reloadViewDataHandler = () => {
+const reloadViewDataHandler = (params: void | { shouldShowLoading?: boolean | undefined; offset?: number | undefined }) => {
   if (vGroup.value.nested) {
-    props.loadGroups({}, vGroup.value)
+    props.loadGroups({ ...(params?.offset !== undefined ? { offset: params.offset } : {}) }, vGroup.value)
   } else {
-    props.loadGroupData(vGroup.value, true)
+    _loadGroupData(vGroup.value, true, {
+      ...(params?.offset !== undefined ? { offset: params.offset } : {}),
+    })
   }
 }
+
+onMounted(async () => {
+  reloadViewDataHook?.on(reloadViewDataHandler)
+})
 
 onBeforeUnmount(async () => {
   reloadViewDataHook?.off(reloadViewDataHandler)
 })
 
-reloadViewDataHook?.on(reloadViewDataHandler)
-
-watch(
-  [() => vGroup.value.key],
-  async (n, o) => {
-    if (n !== o) {
-      isViewDataLoading.value = true
-      isPaginationLoading.value = true
-
-      if (vGroup.value.nested) {
-        await props.loadGroups({}, vGroup.value)
-      } else {
-        await props.loadGroupData(vGroup.value, true)
-      }
-
-      isViewDataLoading.value = false
-      isPaginationLoading.value = false
+watch([() => vGroup.value.key], async (n, o) => {
+  if (n !== o) {
+    if (!vGroup.value.nested) {
+      await _loadGroupData(vGroup.value, true)
+    } else if (vGroup.value.nested) {
+      await props.loadGroups({}, vGroup.value)
     }
-  },
-  { immediate: true },
-)
+  }
+})
+
+onMounted(async () => {
+  if (vGroup.value.root === true) {
+    await props.loadGroups({}, vGroup.value)
+  }
+})
 
 if (vGroup.value.root === true) provide(ScrollParentInj, wrapper)
 
@@ -154,21 +161,23 @@ const parseKey = (group: Group) => {
   }
 
   // show the groupBy dateTime field title format as like cell format
-  if (key && group.column?.uidt === UITypes.DateTime && dayjs(key).isValid()) {
-    const dateFormat = parseProp(group.column?.meta)?.date_format ?? dateFormats[0]
-    const timeFormat = parseProp(group.column?.meta)?.time_format ?? timeFormats[0]
-
-    const dateTimeFormat = `${dateFormat} ${timeFormat}`
-
-    return [dayjs(key).utc().local().format(dateTimeFormat)]
+  if (key && group.column?.uidt === UITypes.DateTime) {
+    return [
+      parseStringDateTime(
+        key,
+        `${parseProp(group.column?.meta)?.date_format ?? dateFormats[0]} ${
+          parseProp(group.column?.meta)?.time_format ?? timeFormats[0]
+        }`,
+      ),
+    ]
   }
 
   // show the groupBy time field title format as like cell format
-  if (key && group.column?.uidt === UITypes.Time && dayjs(key).isValid()) {
-    return [dayjs(key).format(timeFormats[0])]
+  if (key && group.column?.uidt === UITypes.Time) {
+    return [parseStringDateTime(key, timeFormats[0], false)]
   }
 
-  if (key && group.column?.uidt === UITypes.User) {
+  if (key && [UITypes.User, UITypes.CreatedBy, UITypes.LastModifiedBy].includes(group.column?.uidt as UITypes)) {
     try {
       const parsedKey = JSON.parse(key)
       return [parsedKey]
@@ -181,7 +190,19 @@ const parseKey = (group: Group) => {
 }
 
 const shouldRenderCell = (column) =>
-  [UITypes.Lookup, UITypes.Attachment, UITypes.Barcode, UITypes.QrCode, UITypes.Links, UITypes.User].includes(column?.uidt)
+  [
+    UITypes.Lookup,
+    UITypes.Attachment,
+    UITypes.Barcode,
+    UITypes.QrCode,
+    UITypes.Links,
+    UITypes.User,
+    UITypes.DateTime,
+    UITypes.CreatedTime,
+    UITypes.LastModifiedTime,
+    UITypes.CreatedBy,
+    UITypes.LastModifiedBy,
+  ].includes(column?.uidt)
 </script>
 
 <template>
@@ -194,7 +215,7 @@ const shouldRenderCell = (column) =>
     >
       <div
         ref="scrollable"
-        class="flex flex-col h-full"
+        class="flex flex-col"
         :class="{ 'my-2': vGroup.root !== true }"
         :style="`${vGroup.root === true ? 'width: fit-content' : 'width: 100%'}`"
       >
@@ -216,7 +237,7 @@ const shouldRenderCell = (column) =>
           >
             <a-collapse-panel
               v-for="[i, grp] of Object.entries(vGroup?.children ?? [])"
-              :key="`group-panel-${i}`"
+              :key="`group-panel-${grp.key}`"
               class="!border-1 nc-group rounded-[12px]"
               :class="{ 'mb-4': vGroup.children && +i !== vGroup.children.length - 1 }"
               :style="`background: rgb(${245 - _depth * 10}, ${245 - _depth * 10}, ${245 - _depth * 10})`"
@@ -226,26 +247,18 @@ const shouldRenderCell = (column) =>
                 <div class="flex !sticky left-[15px]">
                   <div class="flex items-center">
                     <span role="img" aria-label="right" class="anticon anticon-right ant-collapse-arrow">
-                      <svg
-                        focusable="false"
-                        data-icon="right"
-                        width="1em"
-                        height="1em"
-                        fill="currentColor"
-                        aria-hidden="true"
-                        viewBox="64 64 896 896"
-                        :style="`${activeGroups.includes(i) ? 'transform: rotate(90deg)' : ''}`"
-                      >
-                        <path
-                          d="M765.7 486.8L314.9 134.7A7.97 7.97 0 00302 141v77.3c0 4.9 2.3 9.6 6.1 12.6l360 281.1-360 281.1c-3.9 3-6.1 7.7-6.1 12.6V883c0 6.7 7.7 10.4 12.9 6.3l450.8-352.1a31.96 31.96 0 000-50.4z"
-                        ></path>
-                      </svg>
+                      <GeneralIcon
+                        icon="chevronDown"
+                        :style="`${activeGroups.includes(grp.key) ? 'transform: rotate(360deg)' : 'transform: rotate(270deg)'}`"
+                      ></GeneralIcon>
                     </span>
                   </div>
                   <div class="flex items-center">
                     <div class="flex flex-col">
                       <div class="flex gap-2">
-                        <div class="text-xs nc-group-column-title">{{ grp.column.title }}</div>
+                        <div class="text-xs nc-group-column-title">
+                          {{ grp.column.title }}
+                        </div>
                         <div class="text-xs text-gray-400 nc-group-row-count">({{ $t('datatype.Count') }}: {{ grp.count }})</div>
                       </div>
                       <div class="flex mt-1">
@@ -321,7 +334,7 @@ const shouldRenderCell = (column) =>
                 v-if="!grp.nested && grp.rows"
                 :group="grp"
                 :load-groups="loadGroups"
-                :load-group-data="loadGroupData"
+                :load-group-data="_loadGroupData"
                 :load-group-page="loadGroupPage"
                 :group-wrapper-change-page="groupWrapperChangePage"
                 :row-height="rowHeight"
@@ -338,7 +351,7 @@ const shouldRenderCell = (column) =>
                 v-else
                 :group="grp"
                 :load-groups="loadGroups"
-                :load-group-data="loadGroupData"
+                :load-group-data="_loadGroupData"
                 :load-group-page="loadGroupPage"
                 :group-wrapper-change-page="groupWrapperChangePage"
                 :row-height="rowHeight"

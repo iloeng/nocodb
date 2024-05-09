@@ -1,23 +1,27 @@
 import { customAlphabet } from 'nanoid';
-import { getAvailableRollupForUiType, UITypes } from 'nocodb-sdk';
+import {
+  getAvailableRollupForUiType,
+  RelationTypes,
+  UITypes,
+} from 'nocodb-sdk';
 import { pluralize, singularize } from 'inflection';
-import type { RollupColumn } from '~/models';
 import type {
   BoolType,
   ColumnReqType,
   LinkToAnotherRecordType,
   LookupColumnReqType,
-  RelationTypes,
   RollupColumnReqType,
   TableType,
 } from 'nocodb-sdk';
+import type { RollupColumn } from '~/models';
 import type LinkToAnotherRecordColumn from '~/models/LinkToAnotherRecordColumn';
 import type LookupColumn from '~/models/LookupColumn';
 import type Model from '~/models/Model';
+import { GridViewColumn } from '~/models';
 import validateParams from '~/helpers/validateParams';
 import { getUniqueColumnAliasName } from '~/helpers/getUniqueName';
 import Column from '~/models/Column';
-import { GridViewColumn } from '~/models';
+import { DriverClient } from '~/utils/nc-config';
 
 export const randomID = customAlphabet(
   '1234567890abcdefghijklmnopqrstuvwxyz_',
@@ -88,6 +92,90 @@ export async function createHmAndBtColumn(
       fk_index_name: fkColName,
       meta,
       ...(type === 'hm' ? colExtra : {}),
+    });
+  }
+}
+
+/**
+ * Creates a column with a one-to-one (1:1) relationship.
+ * @param {Model} child - The child model.
+ * @param {Model} parent - The parent model.
+ * @param {Column} childColumn - The child column.
+ * @param {RelationTypes} [type] - The type of relationship.
+ * @param {string} [alias] - The alias for the column.
+ * @param {string} [fkColName] - The foreign key column name.
+ * @param {BoolType} [virtual=false] - Whether the column is virtual.
+ * @param {boolean} [isSystemCol=false] - Whether the column is a system column.
+ * @param {any} [columnMeta=null] - Metadata for the column.
+ * @param {any} [colExtra] - Additional column parameters.
+ */
+export async function createOOColumn(
+  child: Model,
+  parent: Model,
+  childColumn: Column,
+  type?: RelationTypes,
+  alias?: string,
+  fkColName?: string,
+  virtual: BoolType = false,
+  isSystemCol = false,
+  columnMeta = null,
+  colExtra?: any,
+) {
+  // save bt column
+  {
+    const title = getUniqueColumnAliasName(
+      await child.getColumns(),
+      `${parent.title}`,
+    );
+    await Column.insert<LinkToAnotherRecordColumn>({
+      title,
+      fk_model_id: child.id,
+      // ref_db_alias
+      uidt: UITypes.LinkToAnotherRecord,
+      type: RelationTypes.ONE_TO_ONE,
+
+      fk_child_column_id: childColumn.id,
+      fk_parent_column_id: parent.primaryKey.id,
+      fk_related_model_id: parent.id,
+      virtual,
+      // if self referencing treat it as system field to hide from ui
+      system: isSystemCol || parent.id === child.id,
+      fk_col_name: fkColName,
+      fk_index_name: fkColName,
+      // ...(colExtra || {}),
+      meta: {
+        ...(colExtra?.meta || {}),
+        // one-to-one relation is combination of both hm and bt to identify table which have
+        // foreign key column(similar to bt) we are adding a boolean flag `bt` under meta
+        bt: true,
+      },
+    });
+  }
+  // save hm column
+  {
+    const title = getUniqueColumnAliasName(
+      await parent.getColumns(),
+      alias || child.title,
+    );
+    const meta = {
+      plural: columnMeta?.plural || pluralize(child.title),
+      singular: columnMeta?.singular || singularize(child.title),
+    };
+
+    await Column.insert({
+      title,
+      fk_model_id: parent.id,
+      uidt: UITypes.LinkToAnotherRecord,
+      type: 'oo',
+      fk_child_column_id: childColumn.id,
+      fk_parent_column_id: parent.primaryKey.id,
+      fk_related_model_id: child.id,
+      virtual,
+      system: isSystemCol,
+      fk_col_name: fkColName,
+      fk_index_name: fkColName,
+      meta,
+      ...(colExtra || {}),
     });
   }
 }
@@ -176,12 +264,10 @@ export async function validateLookupPayload(
       );
     }
   }
-
-  const relation = await (
-    await Column.get({
-      colId: (payload as LookupColumnReqType).fk_relation_column_id,
-    })
-  ).getColOptions<LinkToAnotherRecordType>();
+  const column = await Column.get({
+    colId: (payload as LookupColumnReqType).fk_relation_column_id,
+  });
+  const relation = await column.getColOptions<LinkToAnotherRecordType>();
 
   if (!relation) {
     throw new Error('Relation column not found');
@@ -198,6 +284,13 @@ export async function validateLookupPayload(
     case 'bt':
       relatedColumn = await Column.get({
         colId: relation.fk_parent_column_id,
+      });
+      break;
+    case 'oo':
+      relatedColumn = await Column.get({
+        colId: column.meta?.bt
+          ? relation.fk_parent_column_id
+          : relation.fk_child_column_id,
       });
       break;
   }
@@ -278,12 +371,44 @@ export async function populateRollupForLTAR({
   await GridViewColumn.update(viewCol.id, { show: false });
 }
 
-export const sanitizeColumnName = (name: string) => {
+export const sanitizeColumnName = (name: string, sourceType?: DriverClient) => {
   if (process.env.NC_SANITIZE_COLUMN_NAME === 'false') return name;
-  const columnName = name.replace(/\W/g, '_');
+  let columnName = name.replace(/\W/g, '_');
 
   // if column name only contains _ then return as 'field'
-  if (/^_+$/.test(columnName)) return 'field';
+  if (/^_+$/.test(columnName)) columnName = 'field';
+
+  if (sourceType) {
+    if (sourceType === DriverClient.DATABRICKS) {
+      // databricks column name should be lowercase
+      columnName = columnName.toLowerCase();
+    }
+  }
 
   return columnName;
+};
+
+// if column is an alias column then return the original column
+// for example CreatedTime is an alias column for CreatedTime system column
+export const getRefColumnIfAlias = async (
+  column: Column,
+  columns?: Column[],
+) => {
+  if (
+    !(
+      [
+        UITypes.CreatedTime,
+        UITypes.LastModifiedTime,
+        UITypes.CreatedBy,
+        UITypes.LastModifiedBy,
+      ] as UITypes[]
+    ).includes(column.uidt)
+  )
+    return column;
+
+  return (
+    (columns || (await Column.list({ fk_model_id: column.fk_model_id }))).find(
+      (c) => c.system && c.uidt === column.uidt,
+    ) || column
+  );
 };

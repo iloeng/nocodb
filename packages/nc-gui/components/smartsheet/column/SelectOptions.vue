@@ -3,18 +3,19 @@ import Draggable from 'vuedraggable'
 import { UITypes } from 'nocodb-sdk'
 import InfiniteLoading from 'v3-infinite-loading'
 
-import { IsKanbanInj, enumColor, iconMap, onMounted, useColumnCreateStoreOrThrow, useVModel } from '#imports'
-
 interface Option {
   color: string
   title: string
   id?: string
   fk_colum_id?: string
   order?: number
+  status?: 'remove'
+  index?: number
 }
 
 const props = defineProps<{
   value: any
+  fromTableExplorer?: boolean
 }>()
 
 const emit = defineEmits(['update:value'])
@@ -29,7 +30,7 @@ const { optionsMagic: _optionsMagic } = useNocoEe()
 
 const optionsWrapperDomRef = ref<HTMLElement>()
 
-const options = ref<(Option & { status?: 'remove'; index?: number })[]>([])
+const options = ref<Option[]>([])
 
 const isAddingOption = ref(false)
 
@@ -38,15 +39,14 @@ const OPTIONS_PAGE_COUNT = 20
 const loadedOptionAnchor = ref(OPTIONS_PAGE_COUNT)
 const isReverseLazyLoad = ref(false)
 
-const renderedOptions = ref<(Option & { status?: 'remove'; index?: number })[]>([])
-const savedDefaultOption = ref<Option | null>(null)
-const savedCdf = ref<string | null>(null)
+const renderedOptions = ref<Option[]>([])
+const savedDefaultOption = ref<Option[]>([])
 
 const colorMenus = ref<any>({})
 
 const colors = ref(enumColor.light)
 
-const defaultOption = ref()
+const defaultOption = ref<Option[]>([])
 
 const isKanban = inject(IsKanbanInj, ref(false))
 
@@ -114,15 +114,15 @@ onMounted(() => {
   }
 
   if (vModel.value.cdf && typeof vModel.value.cdf === 'string') {
-    const fndDefaultOption = options.value.find((el) => el.title === vModel.value.cdf)
-    if (!fndDefaultOption) {
+    const fndDefaultOption = options.value.filter((el) => el.title === vModel.value.cdf)
+    if (!fndDefaultOption.length) {
       vModel.value.cdf = vModel.value.cdf.replace(/^'/, '').replace(/'$/, '')
     }
   }
 
-  const fndDefaultOption = options.value.find((el) => el.title === vModel.value.cdf)
-  if (fndDefaultOption) {
-    defaultOption.value = fndDefaultOption
+  const fndDefaultOption = options.value.filter((el) => el.title === vModel.value.cdf)
+  if (fndDefaultOption.length) {
+    defaultOption.value = vModel.value.uidt === UITypes.SingleSelect ? [fndDefaultOption[0]] : fndDefaultOption
   }
 })
 
@@ -175,6 +175,8 @@ const addNewOption = () => {
 // }
 
 const syncOptions = () => {
+  // set initial colOptions if not set
+  vModel.value.colOptions = vModel.value.colOptions || {}
   vModel.value.colOptions.options = options.value
     .filter((op) => op.status !== 'remove')
     .sort((a, b) => {
@@ -203,17 +205,32 @@ const removeRenderedOption = (index: number) => {
 
   const optionId = renderedOptions.value[index]?.id
 
-  if (optionId === defaultOption.value?.id) {
-    savedDefaultOption.value = { ...defaultOption.value }
-    savedCdf.value = vModel.value.cdf
-    defaultOption.value = null
-    vModel.value.cdf = null
+  const removedDefaultOption = defaultOption.value.find((o) => o.id === optionId)
+
+  if (removedDefaultOption) {
+    if (vModel.value.uidt === UITypes.SingleSelect) {
+      savedDefaultOption.value = [removedDefaultOption]
+      defaultOption.value = []
+      vModel.value.cdf = null
+    } else {
+      savedDefaultOption.value = [...savedDefaultOption.value, removedDefaultOption]
+      defaultOption.value = defaultOption.value.filter((o) => o.id !== optionId)
+      vModel.value.cdf = defaultOption.value.map((o) => o.title).join(',')
+    }
   }
 }
 
-const optionChanged = (changedId: string) => {
-  if (changedId && changedId === defaultOption.value?.id) {
-    vModel.value.cdf = defaultOption.value.title
+const optionChanged = (changedElement: Option) => {
+  const changedDefaultOptionIndex = defaultOption.value.findIndex((o) => o.id === changedElement.id)
+
+  if (changedDefaultOptionIndex !== -1) {
+    if (vModel.value.uidt === UITypes.SingleSelect) {
+      defaultOption.value[changedDefaultOptionIndex].title = changedElement.title
+      vModel.value.cdf = changedElement.title
+    } else {
+      defaultOption.value[changedDefaultOptionIndex].title = changedElement.title
+      vModel.value.cdf = defaultOption.value.map((o) => o.title).join(',')
+    }
   }
   syncOptions()
 }
@@ -232,11 +249,18 @@ const undoRemoveRenderedOption = (index: number) => {
 
   const optionId = renderedOptions.value[index]?.id
 
-  if (optionId === savedDefaultOption.value?.id) {
-    defaultOption.value = { ...savedDefaultOption.value }
-    vModel.value.cdf = savedCdf.value
-    savedDefaultOption.value = null
-    savedCdf.value = null
+  const addedDefaultOption = savedDefaultOption.value.find((o) => o.id === optionId)
+
+  if (addedDefaultOption) {
+    if (vModel.value.uidt === UITypes.SingleSelect) {
+      defaultOption.value = [addedDefaultOption]
+      vModel.value.cdf = addedDefaultOption.title
+      savedDefaultOption.value = []
+    } else {
+      defaultOption.value = [...defaultOption.value, addedDefaultOption]
+      vModel.value.cdf = defaultOption.value.map((o) => o.title).join(',')
+      savedDefaultOption.value = savedDefaultOption.value.filter((o) => o.id !== optionId)
+    }
   }
 }
 
@@ -248,12 +272,26 @@ const undoRemoveRenderedOption = (index: number) => {
 // })
 
 // Removes the Select Option from cdf if the option is removed
-watch(vModel.value, (next) => {
+watch(vModel, (next) => {
   const cdfs = (next.cdf ?? '').toString().split(',')
-  const values = (next.colOptions.options ?? []).map((col) => {
-    return col.title.replace(/^'/, '').replace(/'$/, '')
-  })
-  const newCdf = cdfs.filter((c: string) => values.includes(c)).join(',')
+
+  const valuesMap = (next.colOptions?.options ?? []).reduce((acc, c) => {
+    acc[c.title.replace(/^'|'$/g, '')] = c
+    return acc
+  }, {})
+
+  defaultOption.value = []
+
+  const newCdf = cdfs
+    .filter((c: string) => {
+      if (valuesMap[c]) {
+        defaultOption.value.push(valuesMap[c])
+        return true
+      }
+      return false
+    })
+    .join(',')
+
   next.cdf = newCdf.length === 0 ? null : newCdf
 })
 
@@ -308,7 +346,7 @@ const loadListData = async ($state: any) => {
       ref="optionsWrapperDomRef"
       class="nc-col-option-select-option overflow-x-auto scrollbar-thin-dull"
       :style="{
-        maxHeight: 'calc(min(30vh, 250px))',
+        maxHeight: props.fromTableExplorer ? 'calc(100vh - (var(--topbar-height) * 3.6) - 320px)' : 'calc(min(30vh, 250px))',
       }"
     >
       <InfiniteLoading v-if="isReverseLazyLoad" v-bind="$attrs" @infinite="loadListDataReverse">
@@ -362,7 +400,7 @@ const loadListData = async ($state: any) => {
                 :data-testid="`select-column-option-input-${index}`"
                 :disabled="element.status === 'remove'"
                 @keydown.enter.prevent="element.title?.trim() && addNewOption()"
-                @change="optionChanged(element.id)"
+                @change="optionChanged(element)"
               />
             </div>
 

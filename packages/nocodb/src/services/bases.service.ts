@@ -78,8 +78,13 @@ export class BasesService {
       'meta',
       'color',
       'status',
+      'order',
     ]);
     await this.validateProjectTitle(data, base);
+
+    if (data?.order !== undefined) {
+      data.order = !isNaN(+data.order) ? +data.order : 0;
+    }
 
     const result = await Base.update(param.baseId, data);
 
@@ -106,7 +111,7 @@ export class BasesService {
     const base = await Base.getWithInfo(param.baseId);
 
     if (!base) {
-      NcError.notFound('Base not found');
+      NcError.baseNotFound(param.baseId);
     }
 
     await Base.softDelete(param.baseId);

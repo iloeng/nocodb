@@ -15,6 +15,10 @@ export const isYear = (column: ColumnType, abstractType: any) => abstractType ==
 export const isTime = (column: ColumnType, abstractType: any) => abstractType === 'time' || column.uidt === UITypes.Time
 export const isDateTime = (column: ColumnType, abstractType: any) =>
   abstractType === 'datetime' || column.uidt === UITypes.DateTime
+export const isReadonlyDateTime = (column: ColumnType, _abstractType: any) =>
+  column.uidt === UITypes.CreatedTime || column.uidt === UITypes.LastModifiedTime
+export const isReadonlyUser = (column: ColumnType, _abstractType: any) =>
+  column.uidt === UITypes.CreatedBy || column.uidt === UITypes.LastModifiedBy
 export const isJSON = (column: ColumnType) => column.uidt === UITypes.JSON
 export const isEnum = (column: ColumnType) => column.uidt === UITypes.SingleSelect
 export const isSingleSelect = (column: ColumnType) => column.uidt === UITypes.SingleSelect
@@ -77,4 +81,35 @@ export const renderValue = (result?: any) => {
     // assume HH:mm at this moment
     return dayjs(d).isValid() ? dayjs(d).format('YYYY-MM-DD HH:mm') : d
   })
+}
+
+export const isNumericFieldType = (column: ColumnType, abstractType: any) => {
+  return (
+    isInt(column, abstractType) ||
+    isFloat(column, abstractType) ||
+    isDecimal(column) ||
+    isCurrency(column) ||
+    isPercent(column) ||
+    isDuration(column)
+  )
+}
+
+export const rowHeightInPx: Record<string, number> = {
+  1: 32,
+  2: 60,
+  4: 90,
+  6: 120,
+}
+
+export const rowHeightTruncateLines = (rowHeight?: number) => {
+  switch (rowHeight) {
+    case 2:
+      return 2
+    case 4:
+      return 3
+    case 6:
+      return 4
+    default:
+      return 1
+  }
 }

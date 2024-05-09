@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import type { SelectProps } from 'ant-design-vue'
 import type { ColumnType, LinkToAnotherRecordType } from 'nocodb-sdk'
-import { RelationTypes, UITypes, isLinksOrLTAR, isSystemColumn, isVirtualCol } from 'nocodb-sdk'
-import { MetaInj, computed, inject, ref, resolveComponent, useViewColumnsOrThrow } from '#imports'
+import { RelationTypes, UITypes, isHiddenCol, isLinksOrLTAR, isSystemColumn, isVirtualCol } from 'nocodb-sdk'
 
 const { modelValue, isSort, allowEmpty, ...restProps } = defineProps<{
   modelValue?: string
@@ -26,12 +25,25 @@ const { showSystemFields, metaColumnById } = useViewColumnsOrThrow()
 
 const options = computed<SelectProps['options']>(() =>
   (
-    customColumns.value ||
+    customColumns.value?.filter((c: ColumnType) => {
+      if (isSystemColumn(metaColumnById?.value?.[c.id!])) {
+        if (isHiddenCol(c)) {
+          /** ignore mm relation column, created by and last modified by system field */
+          return false
+        }
+      }
+      return true
+    }) ||
     meta.value?.columns?.filter((c: ColumnType) => {
       if (c.uidt === UITypes.Links) {
         return true
       }
       if (isSystemColumn(metaColumnById?.value?.[c.id!])) {
+        if (isHiddenCol(c)) {
+          /** ignore mm relation column, created by and last modified by system field */
+          return false
+        }
+
         return (
           /** if the field is used in filter, then show it anyway */
           localValue.value === c.id ||
@@ -81,8 +93,8 @@ if (!localValue.value && allowEmpty !== true) {
   >
     <a-select-option v-for="option in options" :key="option.value" :label="option.label" :value="option.value">
       <div class="flex items-center w-full justify-between w-full gap-2 max-w-50">
-        <div class="flex gap-1 flex-1 items-center truncate items-center h-full">
-          <component :is="option.icon" class="min-w-5 !mx-0" />
+        <div class="flex gap-1.5 flex-1 items-center truncate items-center h-full">
+          <component :is="option.icon" class="!w-3.5 !h-3.5 !mx-0 !text-gray-500" />
           <NcTooltip
             :style="{ wordBreak: 'keep-all', whiteSpace: 'nowrap', display: 'inline' }"
             class="max-w-[15rem] truncate select-none"

@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { useColumnCreateStoreOrThrow, useVModel } from '#imports'
-
 const props = defineProps<{
   value: any
 }>()
@@ -49,16 +47,24 @@ vModel.value.meta = {
 </script>
 
 <template>
-  <a-row class="my-2" gutter="8">
+  <a-row class="my-2" :gutter="8">
     <a-col :span="12">
       <a-form-item v-bind="validateInfos['meta.singular']" :label="$t('labels.singularLabel')">
-        <a-input v-model:value="vModel.meta.singular" :placeholder="$t('general.link')" class="!w-full nc-link-singular" />
+        <a-input
+          v-model:value="vModel.meta.singular"
+          :placeholder="$t('general.link')"
+          class="!w-full nc-link-singular !rounded-md"
+        />
       </a-form-item>
     </a-col>
 
     <a-col :span="12">
       <a-form-item v-bind="validateInfos['meta.plural']" :label="$t('labels.pluralLabel')">
-        <a-input v-model:value="vModel.meta.plural" :placeholder="$t('general.links')" class="!w-full nc-link-plural" />
+        <a-input
+          v-model:value="vModel.meta.plural"
+          :placeholder="$t('general.links')"
+          class="!w-full nc-link-plural !rounded-md"
+        />
       </a-form-item>
     </a-col>
   </a-row>

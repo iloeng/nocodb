@@ -2,20 +2,7 @@
 import type { VNodeRef } from '@vue/runtime-core'
 import type { OrgUserReqType } from 'nocodb-sdk'
 import { OrgUserRoles } from 'nocodb-sdk'
-import type { User, Users } from '#imports'
-import {
-  Form,
-  computed,
-  emailValidator,
-  extractSdkResponseErrorMsg,
-  iconMap,
-  message,
-  ref,
-  useCopy,
-  useDashboard,
-  useI18n,
-  useNuxtApp,
-} from '#imports'
+import { extractEmail } from '~/helpers/parsers/parserHelpers'
 
 interface Props {
   show: boolean
@@ -99,6 +86,12 @@ const clickInviteMore = () => {
 }
 
 const emailInput: VNodeRef = (el) => (el as HTMLInputElement)?.focus()
+
+const onPaste = (e: ClipboardEvent) => {
+  const pastedText = e.clipboardData?.getData('text') ?? ''
+
+  usersData.value.emails = extractEmail(pastedText) || pastedText
+}
 </script>
 
 <template>
@@ -189,6 +182,7 @@ const emailInput: VNodeRef = (el) => (el as HTMLInputElement)?.focus()
                       size="middle"
                       validate-trigger="onBlur"
                       :placeholder="$t('labels.email')"
+                      @paste.prevent="onPaste"
                     />
                   </a-form-item>
                 </div>

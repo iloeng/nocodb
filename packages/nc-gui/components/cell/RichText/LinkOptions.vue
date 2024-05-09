@@ -6,11 +6,14 @@ import type { Mark } from 'prosemirror-model'
 
 const props = defineProps<Props>()
 
+const emits = defineEmits(['blur'])
+
 interface Props {
   editor: Editor
+  isFormField?: boolean
 }
 
-const editor = computed(() => props.editor)
+const { editor, isFormField } = toRefs(props)
 
 const inputRef = ref<HTMLInputElement>()
 const linkNodeMark = ref<Mark | undefined>()
@@ -158,33 +161,54 @@ const openLink = () => {
     window.open(href.value, '_blank', 'noopener,noreferrer')
   }
 }
+
+const onMountLinkOptions = (e) => {
+  if (e?.popper?.style) {
+    e.popper.style.width = '95%'
+  }
+}
+
+const tabIndex = computed(() => {
+  return isFormField.value ? -1 : 0
+})
 </script>
 
 <template>
-  <BubbleMenu :editor="editor" :tippy-options="{ duration: 100, maxWidth: 600 }" :should-show="(checkLinkMark as any)">
+  <BubbleMenu
+    :editor="editor"
+    :tippy-options="{
+      duration: 100,
+      maxWidth: 600,
+      onMount: onMountLinkOptions,
+    }"
+    :should-show="(checkLinkMark as any)"
+  >
     <div
       v-if="!justDeleted"
       ref="wrapperRef"
-      class="relative bubble-menu nc-text-area-rich-link-options flex flex-col bg-gray-50 py-1 px-1 rounded-lg"
+      class="relative bubble-menu nc-text-area-rich-link-options flex flex-col bg-gray-50 py-1 px-1 rounded-lg w-full"
       data-testid="nc-text-area-rich-link-options"
       @keydown.stop="handleKeyDown"
     >
       <div class="flex items-center gap-x-1">
-        <div class="!border-1 !border-gray-200 !py-0.5 bg-gray-100 rounded-md !z-10">
+        <div class="!border-1 !border-gray-200 !py-0.5 bg-gray-100 rounded-md !z-10 flex-1">
           <a-input
             ref="inputRef"
             v-model:value="href"
-            class="nc-text-area-rich-link-option-input flex-1 !w-96 !mx-0.5 !px-1.5 !py-0.5 !rounded-md z-10"
+            :tabindex="tabIndex"
+            class="nc-text-area-rich-link-option-input flex-1 !mx-0.5 !px-1.5 !py-0.5 !rounded-md z-10"
             :bordered="false"
             placeholder="Enter a link"
             @change="onChange"
             @press-enter="onInputBoxEnter"
             @keydown="handleInputBoxKeyDown"
+            @blur="emits('blur')"
           />
         </div>
         <NcTooltip overlay-class-name="nc-text-area-rich-link-options">
           <template #title> Open link </template>
           <NcButton
+            :tabindex="tabIndex"
             :class="{
               '!text-gray-300 cursor-not-allowed': href.length === 0,
             }"
@@ -199,6 +223,7 @@ const openLink = () => {
         <NcTooltip overlay-class-name="nc-text-area-rich-link-options">
           <template #title> Delete link </template>
           <NcButton
+            :tabindex="tabIndex"
             class="!duration-0 !hover:(text-red-400 bg-red-50)"
             data-testid="nc-text-area-rich-link-options-open-delete"
             size="small"

@@ -17,6 +17,7 @@ const openedBaseUrl = computed(() => {
   return `${window.location.origin}/#${baseUrl({
     id: base.value.id!,
     type: 'database',
+    isSharedBase: isSharedBase.value,
   })}`
 })
 </script>
@@ -49,7 +50,7 @@ const openedBaseUrl = computed(() => {
           </template>
           <div class="flex flex-row items-center gap-x-1.5">
             <GeneralProjectIcon
-              :meta="{ type: base?.type }"
+              :type="base?.type"
               class="!grayscale min-w-4"
               :style="{
                 filter: 'grayscale(100%) brightness(115%)',
@@ -68,7 +69,7 @@ const openedBaseUrl = computed(() => {
           </div>
         </NcTooltip>
       </NuxtLink>
-      <div class="px-1.75 text-gray-500">/</div>
+      <div class="px-1.75 text-gray-500">></div>
     </template>
     <template v-if="!(isMobileMode && !activeView?.is_default)">
       <LazyGeneralEmojiPicker v-if="isMobileMode" :emoji="activeTable?.meta?.icon" readonly size="xsmall">
@@ -112,7 +113,7 @@ const openedBaseUrl = computed(() => {
             <NuxtLink
               v-else
               class="!text-inherit !underline-transparent !hover:(text-black underline-gray-600)"
-              :to="tableUrl({ table: activeTable, completeUrl: true })"
+              :to="tableUrl({ table: activeTable, completeUrl: true, isSharedBase })"
             >
               {{ activeTable?.title }}
             </NuxtLink>
@@ -121,7 +122,7 @@ const openedBaseUrl = computed(() => {
       </div>
     </template>
 
-    <div v-if="!isMobileMode" class="pl-1.25 text-gray-500">/</div>
+    <div v-if="!isMobileMode" class="pl-1.25 text-gray-500">></div>
 
     <template v-if="!(isMobileMode && activeView?.is_default)">
       <LazyGeneralEmojiPicker v-if="isMobileMode" :emoji="activeView?.meta?.icon" readonly size="xsmall">

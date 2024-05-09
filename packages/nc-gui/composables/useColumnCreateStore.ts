@@ -3,20 +3,6 @@ import type { ColumnReqType, ColumnType, TableType } from 'nocodb-sdk'
 import { UITypes, isLinksOrLTAR } from 'nocodb-sdk'
 import type { Ref } from 'vue'
 import type { RuleObject } from 'ant-design-vue/es/form'
-import {
-  Form,
-  computed,
-  createInjectionState,
-  extractSdkResponseErrorMsg,
-  message,
-  ref,
-  storeToRefs,
-  useBase,
-  useI18n,
-  useMetas,
-  useNuxtApp,
-  watch,
-} from '#imports'
 
 const clone = rfdc()
 
@@ -114,6 +100,20 @@ const [useProvideColumnCreateStore, useColumnCreateStore] = createInjectionState
             validator: (rule: any, value: any) => {
               return new Promise<void>((resolve, reject) => {
                 if (
+                  value !== '' &&
+                  (tableExplorerColumns?.value || meta.value?.columns)?.some(
+                    (c) =>
+                      c.id !== formState.value.id && // ignore current column
+                      // compare against column_name and title
+                      ((value || '').toLowerCase() === (c.column_name || '').toLowerCase() ||
+                        (value || '').toLowerCase() === (c.title || '').toLowerCase()) &&
+                      c.system,
+                  )
+                ) {
+                  return reject(new Error(t('msg.error.duplicateSystemColumnName')))
+                }
+                if (
+                  value !== '' &&
                   (tableExplorerColumns?.value || meta.value?.columns)?.some(
                     (c) =>
                       c.id !== formState.value.id && // ignore current column

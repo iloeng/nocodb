@@ -2,7 +2,7 @@ import type { ComputedRef, Ref, ToRefs } from 'vue'
 import type { WritableComputedRef } from '@vue/reactivity'
 import type { JwtPayload } from 'jwt-decode'
 import type { ProjectRoles } from 'nocodb-sdk'
-import type { Language, NcProjectType, User, useCounter } from '#imports'
+import type { NcProjectType } from '#imports'
 
 export interface AppInfo {
   ncSiteUrl: string
@@ -35,6 +35,8 @@ export interface AppInfo {
   mainSubDomain?: string
   dashboardPath: string
   inviteOnlySignup: boolean
+  samlAuthEnabled: boolean
+  samlProviderName: string | null
 }
 
 export interface StoredState {
@@ -50,6 +52,7 @@ export interface StoredState {
   hiddenRelease: string | null
   isMobileMode: boolean | null
   lastOpenedWorkspaceId: string | null
+  gridViewPageSize: number
 }
 
 export type State = ToRefs<Omit<StoredState, 'token'>> & {
@@ -70,7 +73,7 @@ export interface Getters {
 
 export interface Actions {
   signOut: (skipRedirect?: boolean) => void
-  signIn: (token: string) => void
+  signIn: (token: string, keepProps?: boolean) => void
   refreshToken: () => void
   loadAppInfo: () => void
   setIsMobileMode: (isMobileMode: boolean) => void
@@ -85,6 +88,7 @@ export interface Actions {
   }) => void
   getBaseUrl: (workspaceId: string) => string | undefined
   getMainUrl: (workspaceId: string) => string | undefined
+  setGridViewPageSize: (pageSize: number) => void
 }
 
 export type ReadonlyState = Readonly<Pick<State, 'token' | 'user'>> & Omit<State, 'token' | 'user'>

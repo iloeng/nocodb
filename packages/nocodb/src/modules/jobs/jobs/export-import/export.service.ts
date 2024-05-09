@@ -1,18 +1,19 @@
 import { Readable } from 'stream';
-import { isLinksOrLTAR, UITypes, ViewTypes } from 'nocodb-sdk';
+import { isLinksOrLTAR, RelationTypes, UITypes, ViewTypes } from 'nocodb-sdk';
 import { unparse } from 'papaparse';
 import debug from 'debug';
 import { Injectable } from '@nestjs/common';
 import { elapsedTime, initTime } from '../../helpers';
 import type { BaseModelSqlv2 } from '~/db/BaseModelSqlv2';
 import type { View } from '~/models';
+import { Base, Hook, Model, Source } from '~/models';
 import NcConnectionMgrv2 from '~/utils/common/NcConnectionMgrv2';
 import { getViewAndModelByAliasOrId } from '~/modules/datas/helpers';
 import { clearPrefix, generateBaseIdMap } from '~/helpers/exportImportHelpers';
 import NcPluginMgrv2 from '~/helpers/NcPluginMgrv2';
 import { NcError } from '~/helpers/catchError';
 import { DatasService } from '~/services/datas.service';
-import { Base, Hook, Model, Source } from '~/models';
+import { parseMetaProp } from '~/utils/modelUtils';
 
 @Injectable()
 export class ExportService {
@@ -46,8 +47,7 @@ export class ExportService {
 
       let pgSerialLastVal;
 
-      if (!model)
-        return NcError.badRequest(`Model not found for id '${modelId}'`);
+      if (!model) return NcError.tableNotFound(modelId);
 
       const fndProject = bases.find((p) => p.id === model.base_id);
       const base = fndProject || (await Base.get(model.base_id));
@@ -158,12 +158,13 @@ export class ExportService {
         // pg default value fix
         if (source.type === 'pg') {
           if (column.cdf) {
+            const cdf = column.cdf.toString();
             // check if column.cdf has unmatched single quotes
-            const matches = column.cdf.match(/'/g);
+            const matches = cdf.match(/'/g);
             if (matches && matches.length % 2 !== 0) {
               // if so remove after last single quote
-              const lastQuoteIndex = column.cdf.lastIndexOf("'");
-              column.cdf = column.cdf.substring(0, lastQuoteIndex);
+              const lastQuoteIndex = cdf.lastIndexOf("'");
+              column.cdf = cdf.substring(0, lastQuoteIndex);
             }
           }
         }
@@ -219,10 +220,7 @@ export class ExportService {
                 break;
               case 'meta':
                 if (view.type === ViewTypes.KANBAN) {
-                  const meta = JSON.parse(view.view.meta as string) as Record<
-                    string,
-                    any
-                  >;
+                  const meta = parseMetaProp(view.view) as Record<string, any>;
                   for (const [k, v] of Object.entries(meta)) {
                     const colId = idMap.get(k as string);
                     for (const op of v) {
@@ -235,6 +233,23 @@ export class ExportService {
                   view.view.meta = meta;
                 }
                 break;
+              case 'calendar_range':
+                if (view.type === ViewTypes.CALENDAR) {
+                  const range = view.view[k];
+                  view.view[k] = range.map(
+                    (r: {
+                      fk_to_column_id?: string;
+                      fk_from_column_id: string;
+                    }) => {
+                      return {
+                        fk_to_column_id: idMap.get(r.fk_to_column_id),
+                        fk_from_column_id: idMap.get(r.fk_from_column_id),
+                      };
+                    },
+                  );
+                }
+                break;
+
               case 'created_at':
               case 'updated_at':
               case 'fk_view_id':
@@ -388,7 +403,8 @@ export class ExportService {
     for (const column of model.columns.filter(
       (col) =>
         col.uidt === UITypes.LinkToAnotherRecord &&
-        col.colOptions?.type === 'bt',
+        (col.colOptions?.type === RelationTypes.BELONGS_TO ||
+          (col.colOptions?.type === RelationTypes.ONE_TO_ONE && col.meta?.bt)),
     )) {
       await column.getColOptions();
       const fkCol = model.columns.find(
@@ -454,9 +470,12 @@ export class ExportService {
                 }
                 break;
               case UITypes.User:
+              case UITypes.CreatedBy:
+              case UITypes.LastModifiedBy:
                 if (v) {
                   const userIds = [];
-                  for (const user of v as { id: string }[]) {
+                  const userRecord = Array.isArray(v) ? v : [v];
+                  for (const user of userRecord) {
                     userIds.push(user.id);
                   }
                   row[colId] = userIds.join(',');
@@ -510,6 +529,8 @@ export class ExportService {
 
     if (hasLink) {
       linkStream.setEncoding('utf8');
+
+      let streamedHeaders = false;
 
       for (const mm of mmColumns) {
         if (handledMmList.includes(mm.colOptions?.fk_mm_model_id)) continue;
@@ -569,8 +590,11 @@ export class ExportService {
             mmOffset,
             mmLimit,
             mmFields,
-            true,
+            streamedHeaders ? false : true,
           );
+
+          // avoid writing headers for same model multiple times
+          streamedHeaders = true;
         } catch (e) {
           this.debugLog(e);
           throw e;
@@ -604,6 +628,7 @@ export class ExportService {
           query: { limit, offset, fields },
           baseModel,
           ignoreViewFilterAndSort: true,
+          limitOverride: limit,
         })
         .then((result) => {
           try {
@@ -625,12 +650,15 @@ export class ExportService {
                 offset + limit,
                 limit,
                 fields,
-              ).then(resolve);
+              )
+                .then(resolve)
+                .catch(reject);
             }
           } catch (e) {
             reject(e);
           }
-        });
+        })
+        .catch(reject);
     });
   }
 
@@ -653,6 +681,7 @@ export class ExportService {
           query: { limit, offset, fields },
           baseModel,
           ignoreViewFilterAndSort: true,
+          limitOverride: limit,
         })
         .then((result) => {
           try {
@@ -673,12 +702,15 @@ export class ExportService {
                 offset + limit,
                 limit,
                 fields,
-              ).then(resolve);
+              )
+                .then(resolve)
+                .catch(reject);
             }
           } catch (e) {
             reject(e);
           }
-        });
+        })
+        .catch(reject);
     });
   }
 
@@ -687,8 +719,7 @@ export class ExportService {
 
     const source = await Source.get(param.sourceId);
 
-    if (!source)
-      throw NcError.badRequest(`Source not found for id '${param.sourceId}'`);
+    if (!source) NcError.sourceNotFound(param.sourceId);
 
     const base = await Base.get(source.base_id);
 

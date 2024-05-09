@@ -111,6 +111,8 @@ export const baseThemeColors = [
   '#333333',
 ]
 
+export const baseIconColors = ['#36BFFF', '#FA8231', '#FCBE3A', '#27D665', '#6A7184', '#FF4A3F', '#FC3AC6', '#7D26CD']
+
 const designSystem = {
   light: [
     // '#EBF0FF',
@@ -234,4 +236,8 @@ export function isColorDark(hexColor: string) {
   const luminance = 0.299 * rgbColor.r + 0.587 * rgbColor.g + 0.114 * rgbColor.b
   // Choose a luminance threshold (e.g., 0.5) to determine darkness/lightness
   return luminance < 128
+}
+
+export function getEnumColorByIndex(i: number, mode: 'light' | 'dark' = 'light') {
+  return enumColor[mode][i % enumColor[mode].length]
 }

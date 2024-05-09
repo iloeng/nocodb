@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { getMdiIcon, useVModel } from '#imports'
-
 const props = defineProps<{
   value: any
 }>()
@@ -78,7 +76,7 @@ watch(
               <div class="flex-1">
                 <component
                   :is="getMdiIcon(icon.full)"
-                  class="mx-1"
+                  class="mr-[2px]"
                   :style="{
                     color: vModel.meta.color,
                   }"

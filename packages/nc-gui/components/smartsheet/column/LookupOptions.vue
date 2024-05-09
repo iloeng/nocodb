@@ -2,7 +2,6 @@
 import { onMounted } from '@vue/runtime-core'
 import type { ColumnType, LinkToAnotherRecordType, TableType } from 'nocodb-sdk'
 import { UITypes, isLinksOrLTAR, isSystemColumn, isVirtualCol } from 'nocodb-sdk'
-import { MetaInj, inject, ref, storeToRefs, useBase, useColumnCreateStoreOrThrow, useI18n, useMetas, useVModel } from '#imports'
 
 const props = defineProps<{
   value: any
@@ -22,7 +21,7 @@ const baseStore = useBase()
 
 const { tables } = storeToRefs(baseStore)
 
-const { metas } = useMetas()
+const { metas, getMeta } = useMetas()
 
 setAdditionalValidations({
   fk_relation_column_id: [{ required: true, message: t('general.required') }],
@@ -48,12 +47,15 @@ const refTables = computed(() => {
   return _refTables as Required<TableType & { column: ColumnType; col: Required<LinkToAnotherRecordType> }>[]
 })
 
+const selectedTable = computed(() => {
+  return refTables.value.find((t) => t.column.id === vModel.value.fk_relation_column_id)
+})
+
 const columns = computed<ColumnType[]>(() => {
-  const selectedTable = refTables.value.find((t) => t.column.id === vModel.value.fk_relation_column_id)
-  if (!selectedTable?.id) {
+  if (!selectedTable.value?.id) {
     return []
   }
-  return metas.value[selectedTable.id].columns.filter(
+  return metas.value[selectedTable.value.id]?.columns.filter(
     (c: ColumnType) =>
       vModel.value.fk_lookup_column_id === c.id || (!isSystemColumn(c) && c.id !== vModel.value.id && c.uidt !== UITypes.Links),
   )
@@ -66,7 +68,10 @@ onMounted(() => {
   }
 })
 
-const onRelationColChange = () => {
+const onRelationColChange = async () => {
+  if (selectedTable.value) {
+    await getMeta(selectedTable.value.id)
+  }
   vModel.value.fk_lookup_column_id = columns.value?.[0]?.id
   onDataTypeChange()
 }

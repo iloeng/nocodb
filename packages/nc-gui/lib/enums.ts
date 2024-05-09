@@ -5,6 +5,7 @@ export enum ClientType {
   SQLITE = 'sqlite3',
   VITESS = 'vitess',
   SNOWFLAKE = 'snowflake',
+  DATABRICKS = 'databricks',
 }
 
 export enum Language {
@@ -80,6 +81,9 @@ export enum SmartsheetStoreEvents {
   FIELD_ADD = 'field-add',
   MAPPED_BY_COLUMN_CHANGE = 'mapped-by-column-change',
   CLEAR_NEW_ROW = 'clear-new-row',
+  GROUP_BY_ADD = 'group-by-add',
+  GROUP_BY_REMOVE = 'group-by-remove',
+  FILTER_ADD = 'filter-add',
 }
 
 export enum DataSourcesSubTab {
@@ -135,4 +139,27 @@ export enum ImportSource {
   FILE = 'file',
   URL = 'url',
   STRING = 'string',
+}
+
+export enum PreFilledMode {
+  Default = 'default',
+  Hidden = 'hidden',
+  Locked = 'locked',
+}
+
+export enum RichTextBubbleMenuOptions {
+  bold = 'bold',
+  italic = 'italic',
+  underline = 'underline',
+  strike = 'strike',
+  code = 'code',
+  quote = 'quote',
+  heading1 = 'heading1',
+  heading2 = 'heading2',
+  heading3 = 'heading3',
+  blockQuote = 'blockQuote',
+  bulletList = 'bulletList',
+  numberedList = 'numberedList',
+  taskList = 'taskList',
+  link = 'link',
 }

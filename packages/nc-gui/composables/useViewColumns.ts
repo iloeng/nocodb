@@ -1,8 +1,6 @@
-import { ViewTypes, isSystemColumn } from 'nocodb-sdk'
 import type { ColumnType, GridColumnReqType, GridColumnType, MapType, TableType, ViewType } from 'nocodb-sdk'
+import { ViewTypes, isHiddenCol, isSystemColumn } from 'nocodb-sdk'
 import type { ComputedRef, Ref } from 'vue'
-import { computed, ref, storeToRefs, useBase, useNuxtApp, useRoles, useUndoRedo, watch } from '#imports'
-import type { Field } from '#imports'
 
 const [useProvideViewColumns, useViewColumns] = useInjectionState(
   (
@@ -54,7 +52,6 @@ const [useProvideViewColumns, useViewColumns] = useInjectionState(
 
     const loadViewColumns = async () => {
       if (!meta || !view) return
-
       let order = 1
 
       if (view.value?.id) {
@@ -70,7 +67,12 @@ const [useProvideViewColumns, useViewColumns] = useInjectionState(
         }, {})
 
         fields.value = meta.value?.columns
-          ?.map((column: ColumnType) => {
+          ?.filter((column: ColumnType) => {
+            // filter created by and last modified by system columns
+            if (isHiddenCol(column)) return false
+            return true
+          })
+          .map((column: ColumnType) => {
             const currentColumnField = fieldById[column.id!] || {}
 
             return {
@@ -155,7 +157,12 @@ const [useProvideViewColumns, useViewColumns] = useInjectionState(
       $e('a:fields:show-all')
     }
 
-    const saveOrUpdate = async (field: any, index: number, disableDataReload: boolean = false) => {
+    const saveOrUpdate = async (
+      field: any,
+      index: number,
+      disableDataReload: boolean = false,
+      updateDefaultViewColumnOrder: boolean = false,
+    ) => {
       if (isLocalMode.value && fields.value) {
         fields.value[index] = field
         meta.value!.columns = meta.value!.columns?.map((column: ColumnType) => {
@@ -164,6 +171,7 @@ const [useProvideViewColumns, useViewColumns] = useInjectionState(
               ...column,
               ...field,
               id: field.fk_column_id,
+              ...(updateDefaultViewColumnOrder ? { meta: { ...parseProp(column.meta), defaultViewColOrder: field.order } } : {}),
             }
           }
           return column
@@ -187,7 +195,7 @@ const [useProvideViewColumns, useViewColumns] = useInjectionState(
 
       if (!disableDataReload) {
         await loadViewColumns()
-        reloadData?.()
+        reloadData?.({ shouldShowLoading: false })
       }
     }
 
@@ -216,7 +224,12 @@ const [useProvideViewColumns, useViewColumns] = useInjectionState(
     const filteredFieldList = computed(() => {
       return (
         fields.value?.filter((field: Field) => {
-          if (metaColumnById?.value?.[field.fk_column_id!]?.pv) return true
+          if (
+            metaColumnById?.value?.[field.fk_column_id!]?.pv &&
+            (!filterQuery.value || field.title.toLowerCase().includes(filterQuery.value.toLowerCase()))
+          ) {
+            return true
+          }
 
           // hide system columns if not enabled
           if (!showSystemFields.value && isSystemColumn(metaColumnById?.value?.[field.fk_column_id!])) {
@@ -271,7 +284,14 @@ const [useProvideViewColumns, useViewColumns] = useInjectionState(
         },
         scope: defineViewScope({ view: view.value }),
       })
-      saveOrUpdate(field, fieldIndex)
+      saveOrUpdate(field, fieldIndex, !checked)
+    }
+
+    const toggleFieldStyles = (field: any, style: 'underline' | 'bold' | 'italic', status: boolean) => {
+      const fieldIndex = fields.value?.findIndex((f) => f.fk_column_id === field.fk_column_id)
+      if (!fieldIndex && fieldIndex !== 0) return
+      field[style] = status
+      saveOrUpdate(field, fieldIndex, true)
     }
 
     // reload view columns when active view changes
@@ -293,7 +313,7 @@ const [useProvideViewColumns, useViewColumns] = useInjectionState(
       { immediate: true },
     )
 
-    const resizingColOldWith = ref('200px')
+    const resizingColOldWith = ref('180px')
 
     const updateGridViewColumn = async (id: string, props: Partial<GridColumnReqType>, undo = false) => {
       if (!undo) {
@@ -347,6 +367,7 @@ const [useProvideViewColumns, useViewColumns] = useInjectionState(
       showSystemFields,
       metaColumnById,
       toggleFieldVisibility,
+      toggleFieldStyles,
       isViewColumnsLoading,
       updateGridViewColumn,
       gridViewCols,

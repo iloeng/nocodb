@@ -1,31 +1,14 @@
-<script setup lang="ts">
-import {
-  ActiveViewInj,
-  FieldsInj,
-  IsPublicInj,
-  MetaInj,
-  ReadonlyInj,
-  ReloadViewDataHookInj,
-  createEventHook,
-  extractSdkResponseErrorMsg,
-  message,
-  provide,
-  ref,
-  useBase,
-  useGlobal,
-  useProvideSmartsheetStore,
-  useSharedView,
-} from '#imports'
-
+<script lang="ts" setup>
 const { sharedView, meta, nestedFilters } = useSharedView()
 
 const { signedIn } = useGlobal()
 
 const { loadProject } = useBase()
 
-const { isLocked } = useProvideSmartsheetStore(sharedView, meta, true, ref([]), nestedFilters)
+const { isLocked, xWhere } = useProvideSmartsheetStore(sharedView, meta, true, ref([]), nestedFilters)
 
 useProvideKanbanViewStore(meta, sharedView)
+useProvideCalendarViewStore(meta, sharedView)
 
 const reloadEventHook = createEventHook()
 
@@ -40,6 +23,9 @@ provide(IsPublicInj, ref(true))
 provide(IsLockedInj, isLocked)
 
 useProvideViewColumns(sharedView, meta, () => reloadEventHook?.trigger(), true)
+useProvideViewGroupBy(sharedView, meta, xWhere, true)
+
+useProvideSmartsheetLtarHelpers(meta)
 
 if (signedIn.value) {
   try {

@@ -1,4 +1,8 @@
-import { UITypes } from 'nocodb-sdk';
+import {
+  isCreatedOrLastModifiedByCol,
+  isCreatedOrLastModifiedTimeCol,
+  UITypes,
+} from 'nocodb-sdk';
 import request from 'supertest';
 import Model from '../../../src/models/Model';
 import NcConnectionMgrv2 from '../../../src/utils/common/NcConnectionMgrv2';
@@ -7,6 +11,7 @@ import type Column from '../../../src/models/Column';
 import type Filter from '../../../src/models/Filter';
 import type Base from '~/models/Base';
 import type Sort from '../../../src/models/Sort';
+import {View} from "~/models";
 
 const rowValue = (column: ColumnType, index: number) => {
   switch (column.uidt) {
@@ -214,9 +219,11 @@ const listRow = async ({
   base,
   table,
   options,
+  view
 }: {
   base: Base;
   table: Model;
+  view?: View;
   options?: {
     limit?: any;
     offset?: any;
@@ -228,6 +235,7 @@ const listRow = async ({
   const baseModel = await Model.getBaseModelSQL({
     id: table.id,
     dbDriver: await NcConnectionMgrv2.get(sources[0]!),
+    viewId: view?.id,
   });
 
   const ignorePagination = !options;
@@ -257,7 +265,9 @@ const generateDefaultRowAttributes = ({
     if (
       column.uidt === UITypes.LinkToAnotherRecord ||
       column.uidt === UITypes.ForeignKey ||
-      column.uidt === UITypes.ID
+      column.uidt === UITypes.ID ||
+      isCreatedOrLastModifiedTimeCol(column) ||
+      isCreatedOrLastModifiedByCol(column)
     ) {
       return acc;
     }

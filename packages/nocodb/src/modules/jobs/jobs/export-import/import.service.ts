@@ -1,13 +1,24 @@
-import { UITypes, ViewTypes } from 'nocodb-sdk';
-import { Injectable } from '@nestjs/common';
+import {
+  isLinksOrLTAR,
+  isVirtualCol,
+  RelationTypes,
+  UITypes,
+  ViewTypes,
+} from 'nocodb-sdk';
+import { Injectable, Logger } from '@nestjs/common';
 import papaparse from 'papaparse';
 import debug from 'debug';
-import { isLinksOrLTAR, isVirtualCol } from 'nocodb-sdk';
 import { elapsedTime, initTime } from '../../helpers';
-import type { Readable } from 'stream';
 import type { UserType, ViewCreateReqType } from 'nocodb-sdk';
-import type { LinkToAnotherRecordColumn, User, View } from '~/models';
+import type { Readable } from 'stream';
+import type {
+  CalendarView,
+  LinkToAnotherRecordColumn,
+  User,
+  View,
+} from '~/models';
 import type { NcRequest } from '~/interface/config';
+import { Base, Column, Model, Source } from '~/models';
 import {
   findWithIdentifier,
   generateUniqueName,
@@ -18,7 +29,6 @@ import {
   withoutNull,
 } from '~/helpers/exportImportHelpers';
 import { NcError } from '~/helpers/catchError';
-import { Base, Column, Model, Source } from '~/models';
 import { TablesService } from '~/services/tables.service';
 import { ColumnsService } from '~/services/columns.service';
 import { FiltersService } from '~/services/filters.service';
@@ -28,6 +38,7 @@ import { GridColumnsService } from '~/services/grid-columns.service';
 import { FormColumnsService } from '~/services/form-columns.service';
 import { GridsService } from '~/services/grids.service';
 import { FormsService } from '~/services/forms.service';
+import { CalendarsService } from '~/services/calendars.service';
 import { GalleriesService } from '~/services/galleries.service';
 import { KanbansService } from '~/services/kanbans.service';
 import { HooksService } from '~/services/hooks.service';
@@ -39,7 +50,8 @@ import { sanitizeColumnName } from '~/helpers';
 
 @Injectable()
 export class ImportService {
-  private readonly debugLog = debug('nc:jobs:import');
+  protected readonly debugLog = debug('nc:jobs:import');
+  protected readonly logger = new Logger(ImportService.name);
 
   constructor(
     private tablesService: TablesService,
@@ -52,6 +64,7 @@ export class ImportService {
     private gridsService: GridsService,
     private formsService: FormsService,
     private galleriesService: GalleriesService,
+    private calendarsService: CalendarsService,
     private kanbansService: KanbansService,
     private bulkDataService: BulkDataAliasService,
     private hooksService: HooksService,
@@ -81,13 +94,11 @@ export class ImportService {
 
     const base = await Base.get(param.baseId);
 
-    if (!base)
-      return NcError.badRequest(`Base not found for id '${param.baseId}'`);
+    if (!base) return NcError.baseNotFound(param.baseId);
 
     const source = await Source.get(param.sourceId);
 
-    if (!source)
-      return NcError.badRequest(`Source not found for id '${param.sourceId}'`);
+    if (!source) return NcError.sourceNotFound(param.sourceId);
 
     const tableReferences = new Map<string, Model>();
     const linkMap = new Map<string, string>();
@@ -176,7 +187,8 @@ export class ImportService {
           const colRef = modelData.columns.find(
             (a) =>
               a.column_name &&
-              sanitizeColumnName(a.column_name) === col.column_name,
+              sanitizeColumnName(a.column_name, source.type) ===
+                col.column_name,
           );
           idMap.set(colRef.id, col.id);
 
@@ -310,7 +322,10 @@ export class ImportService {
                   }
                 }
               }
-            } else if (colOptions.type === 'hm') {
+            } else if (
+              colOptions.type === RelationTypes.HAS_MANY ||
+              (colOptions.type === RelationTypes.ONE_TO_ONE && !col.meta?.bt)
+            ) {
               // delete col.column_name as it is not required and will cause ajv error (null for LTAR)
               delete col.column_name;
 
@@ -510,7 +525,10 @@ export class ImportService {
                   }
                 }
               }
-            } else if (colOptions.type === 'hm') {
+            } else if (
+              colOptions.type === RelationTypes.HAS_MANY ||
+              (colOptions.type === RelationTypes.ONE_TO_ONE && !col.meta?.bt)
+            ) {
               if (
                 !linkMap.has(
                   `${colOptions.fk_parent_column_id}::${colOptions.fk_child_column_id}`,
@@ -632,7 +650,10 @@ export class ImportService {
                   }
                 }
               }
-            } else if (colOptions.type === 'bt') {
+            } else if (
+              colOptions.type === RelationTypes.BELONGS_TO ||
+              (colOptions.type === RelationTypes.ONE_TO_ONE && col.meta?.bt)
+            ) {
               if (
                 !linkMap.has(
                   `${colOptions.fk_parent_column_id}::${colOptions.fk_child_column_id}`,
@@ -766,6 +787,10 @@ export class ImportService {
             a.uidt === UITypes.Rollup ||
             a.uidt === UITypes.Formula ||
             a.uidt === UITypes.QrCode ||
+            a.uidt === UITypes.CreatedTime ||
+            a.uidt === UITypes.LastModifiedTime ||
+            a.uidt === UITypes.CreatedBy ||
+            a.uidt === UITypes.LastModifiedBy ||
             a.uidt === UITypes.Barcode,
         ),
       );
@@ -820,6 +845,7 @@ export class ImportService {
     }
 
     // create referenced columns
+    // sort the column sets to create the system columns first
     for (const col of sortedReferencedColumnSet) {
       const { colOptions, ...flatCol } = col;
       if (col.uidt === UITypes.Lookup) {
@@ -881,6 +907,32 @@ export class ImportService {
             ...{
               formula_raw: colOptions.formula_raw,
             },
+          }) as any,
+          req: param.req,
+          user: param.user,
+        });
+
+        for (const nColumn of freshModelData.columns) {
+          if (nColumn.title === col.title) {
+            idMap.set(col.id, nColumn.id);
+            break;
+          }
+        }
+      } else if (
+        col.uidt === UITypes.CreatedTime ||
+        col.uidt === UITypes.LastModifiedTime ||
+        col.uidt === UITypes.CreatedBy ||
+        col.uidt === UITypes.LastModifiedBy
+      ) {
+        if (col.system) continue;
+        const freshModelData = await this.columnsService.columnAdd({
+          tableId: getIdOrExternalId(getParentIdentifier(col.id)),
+          column: withoutId({
+            ...flatCol,
+            // provide column_name to avoid ajv error
+            // it will be ignored by the service
+            column_name: 'system',
+            system: false,
           }) as any,
           req: param.req,
           user: param.user,
@@ -1010,12 +1062,21 @@ export class ImportService {
             (a) => a.fk_column_id === reverseGet(idMap, cl.fk_column_id),
           );
           if (!fcl) continue;
+          const calendarColProperties =
+            vw.type === ViewTypes.CALENDAR
+              ? {
+                  bold: fcl.bold,
+                  italic: fcl.italic,
+                  underline: fcl.underline,
+                }
+              : {};
           await this.viewColumnsService.columnUpdate({
             viewId: vw.id,
             columnId: cl.id,
             column: {
               show: fcl.show,
               order: fcl.order,
+              ...calendarColProperties,
             },
             req: param.req,
           });
@@ -1056,6 +1117,7 @@ export class ImportService {
             break;
           case ViewTypes.GALLERY:
           case ViewTypes.KANBAN:
+          case ViewTypes.CALENDAR:
             break;
         }
 
@@ -1183,6 +1245,22 @@ export class ImportService {
         }
         return fview;
       }
+      case ViewTypes.CALENDAR: {
+        return await this.calendarsService.calendarViewCreate({
+          tableId: md.id,
+          calendar: {
+            ...vw,
+            calendar_range: (vw.view as CalendarView).calendar_range.map(
+              (a) => ({
+                fk_from_column_id: idMap.get(a.fk_from_column_id),
+                fk_to_column_id: idMap.get((a as any).fk_to_column_id),
+              }),
+            ),
+          } as ViewCreateReqType,
+          user,
+          req,
+        });
+      }
       case ViewTypes.GALLERY: {
         const glview = await this.galleriesService.galleryViewCreate({
           tableId: md.id,
@@ -1287,9 +1365,8 @@ export class ImportService {
     const destProject = await Base.get(baseId);
     const destBase = await Source.get(sourceId);
 
-    if (!destProject || !destBase) {
-      throw NcError.badRequest('Base or Source not found');
-    }
+    if (!destProject) return NcError.baseNotFound(baseId);
+    if (!destBase) return NcError.sourceNotFound(sourceId);
 
     switch (src.type) {
       case 'local': {
@@ -1411,7 +1488,11 @@ export class ImportService {
                   colId: id,
                 });
                 if (col) {
-                  if (col.colOptions?.type === 'bt') {
+                  if (
+                    col.colOptions?.type === RelationTypes.BELONGS_TO ||
+                    (col.colOptions?.type === RelationTypes.ONE_TO_ONE &&
+                      col.meta?.bt)
+                  ) {
                     const childCol = await Column.get({
                       source_id: destBase.id,
                       colId: col.colOptions.fk_child_column_id,
@@ -1461,7 +1542,7 @@ export class ImportService {
                     raw: true,
                   });
                 } catch (e) {
-                  this.debugLog(e);
+                  this.logger.error(e);
                 }
                 chunk = [];
                 parser.resume();
@@ -1482,7 +1563,7 @@ export class ImportService {
                 raw: true,
               });
             } catch (e) {
-              this.debugLog(e);
+              this.logger.error(e);
             }
             chunk = [];
           }
@@ -1519,7 +1600,7 @@ export class ImportService {
           });
           lChunks[k] = [];
         } catch (e) {
-          this.debugLog(e);
+          this.logger.error(e);
         }
       }
     };

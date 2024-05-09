@@ -2,7 +2,6 @@
 import type { VNodeRef } from '@vue/runtime-core'
 import { message } from 'ant-design-vue'
 import type { ApiTokenType, RequestParams } from 'nocodb-sdk'
-import { extractSdkResponseErrorMsg, isEeUI, ref, useApi, useCopy, useNuxtApp } from '#imports'
 import { extractNextDefaultName } from '~/helpers/parsers/parserHelpers'
 
 const { api, isLoading } = useApi()
@@ -44,6 +43,8 @@ const pagination = reactive({
   total: 0,
   pageSize: 10,
 })
+
+const isLoadingAllTokens = ref(true)
 
 const setDefaultTokenName = () => {
   selectedTokenData.value.description = extractNextDefaultName(
@@ -94,7 +95,7 @@ const updateAllTokens = (type: 'delete' | 'add', token: IApiTokenInfo) => {
   setDefaultTokenName()
 }
 
-const loadTokens = async (page = currentPage.value, limit = currentLimit.value) => {
+const loadTokens = async (page = currentPage.value, limit = currentLimit.value, hideShowNewToken = false) => {
   currentPage.value = page
   try {
     const response: any = await api.orgTokens.list({
@@ -103,18 +104,30 @@ const loadTokens = async (page = currentPage.value, limit = currentLimit.value) 
         offset: searchText.value.length === 0 ? (page - 1) * limit : 0,
       },
     } as RequestParams)
-    if (!response) return
+    if (!response) {
+      isLoadingAllTokens.value = false
+      return
+    }
 
     pagination.total = response.pageInfo.totalRows ?? 0
     pagination.pageSize = 10
 
     tokens.value = response.list as IApiTokenInfo[]
 
+    if (hideShowNewToken) {
+      showNewTokenModal.value = false
+      selectedTokenData.value = {}
+    }
+
     if (!allTokens.value.length) {
       await loadAllTokens(pagination.total)
     }
   } catch (e: any) {
     message.error(await extractSdkResponseErrorMsg(e))
+  } finally {
+    if (isLoadingAllTokens.value) {
+      isLoadingAllTokens.value = false
+    }
   }
 }
 
@@ -159,11 +172,10 @@ const generateToken = async () => {
   if (!isValidTokenName.value) return
   try {
     const token = await api.orgTokens.create(selectedTokenData.value)
-    showNewTokenModal.value = false
+
     // Token generated successfully
     // message.success(t('msg.success.tokenGenerated'))
-    selectedTokenData.value = {}
-    await loadTokens()
+    await loadTokens(currentPage.value, currentLimit.value, true)
 
     updateAllTokens('add', token as IApiTokenInfo)
   } catch (e: any) {
@@ -216,7 +228,7 @@ const handleCancel = () => {
     <div class="max-w-202 mx-auto px-4 h-full" data-testid="nc-token-list">
       <div class="py-2 flex gap-4 items-baseline justify-between">
         <h6 class="text-2xl text-left font-bold" data-rec="true">{{ $t('title.apiTokens') }}</h6>
-        <NcTooltip :disabled="!(isEeUI && tokens.length)">
+        <NcTooltip v-if="tokens.length" :disabled="!(isEeUI && tokens.length)">
           <template #title>{{ $t('labels.tokenLimit') }}</template>
           <NcButton
             :disabled="showNewTokenModal || (isEeUI && tokens.length)"
@@ -237,7 +249,7 @@ const handleCancel = () => {
         </NcTooltip>
       </div>
       <span data-rec="true">{{ $t('msg.apiTokenCreate') }}</span>
-      <div class="mt-5 h-[calc(100%-13rem)]">
+      <div v-if="!isLoadingAllTokens && (tokens.length || showNewTokenModal)" class="mt-5 h-[calc(100%-13rem)]">
         <div class="h-full w-full !overflow-hidden rounded-md">
           <div class="flex w-full pl-5 bg-gray-50 border-1 rounded-t-md">
             <span class="py-3.5 text-gray-500 font-medium text-3.5 w-2/9" data-rec="true">{{ $t('title.tokenName') }}</span>
@@ -268,6 +280,7 @@ const handleCancel = () => {
                     class="!rounded-lg !py-1"
                     placeholder="Token Name"
                     data-testid="nc-token-input"
+                    :disabled="isLoading"
                     @press-enter="generateToken"
                   />
                   <span v-if="!isValidTokenName" class="text-red-500 text-xs font-light mt-1.5 ml-1" data-rec="true"
@@ -278,13 +291,7 @@ const handleCancel = () => {
                   <NcButton v-if="!isLoading" type="secondary" size="small" @click="handleCancel">
                     {{ $t('general.cancel') }}
                   </NcButton>
-                  <NcButton
-                    type="primary"
-                    size="sm"
-                    :is-loading="isLoading"
-                    data-testid="nc-token-save-btn"
-                    @click="generateToken"
-                  >
+                  <NcButton type="primary" size="sm" :loading="isLoading" data-testid="nc-token-save-btn" @click="generateToken">
                     {{ $t('general.save') }}
                   </NcButton>
                 </div>
@@ -304,17 +311,17 @@ const handleCancel = () => {
               class="flex pl-5 py-3 justify-between token items-center border-l-1 border-r-1 border-b-1"
             >
               <span class="text-black font-bold text-3.5 text-start w-2/9">
-                <GeneralTruncateText placement="top" length="20">
+                <GeneralTruncateText placement="top" :length="20">
                   {{ el.description }}
                 </GeneralTruncateText>
               </span>
               <span class="text-gray-500 font-medium text-3.5 text-start w-2/9">
-                <GeneralTruncateText placement="top" length="20">
+                <GeneralTruncateText placement="top" :length="20">
                   {{ el.created_by }}
                 </GeneralTruncateText>
               </span>
               <span class="text-gray-500 font-medium text-3.5 text-start w-3/9">
-                <GeneralTruncateText v-if="el.token === selectedToken.id && selectedToken.isShow" placement="top" length="29">
+                <GeneralTruncateText v-if="el.token === selectedToken.id && selectedToken.isShow" placement="top" :length="29">
                   {{ el.token }}
                 </GeneralTruncateText>
                 <span v-else>************************************</span>
@@ -329,15 +336,15 @@ const handleCancel = () => {
                     @click="hideOrShowToken(el.token as string)"
                   />
                 </NcTooltip>
-                <NcTooltip placement="top" class="h-4">
+                <NcTooltip placement="top">
                   <template #title>{{ $t('general.copy') }}</template>
                   <component
                     :is="iconMap.copy"
-                    class="hover::cursor-pointer w-4 h-4 text-gray-600 mt-0.25"
+                    class="hover::cursor-pointer w-4 h-4 text-gray-600"
                     @click="copyToken(el.token)"
                   />
                 </NcTooltip>
-                <NcTooltip placement="top" class="mb-0.5">
+                <NcTooltip placement="top">
                   <template #title>{{ $t('general.delete') }}</template>
                   <component
                     :is="iconMap.delete"
@@ -350,6 +357,25 @@ const handleCancel = () => {
             </div>
           </div>
         </div>
+      </div>
+      <div
+        v-else-if="!isLoadingAllTokens && !tokens.length && !showNewTokenModal"
+        class="max-w-[40rem] border px-3 py-6 flex flex-col items-center justify-center gap-6 text-center"
+      >
+        <img src="~assets/img/placeholder/api-tokens.png" class="!w-[22rem] flex-none" />
+
+        <div class="text-2xl text-gray-800 font-bold">{{ $t('placeholder.noTokenCreated') }}</div>
+        <div class="text-sm text-gray-700">
+          {{ $t('placeholder.noTokenCreatedLabel') }}
+        </div>
+        <NcButton class="!rounded-lg !py-3 !h-10" data-testid="nc-token-create" type="primary" @click="showNewTokenModal = true">
+          <span class="hidden md:block" data-rec="true">
+            {{ $t('title.createNewToken') }}
+          </span>
+          <span class="flex items-center justify-center md:hidden" data-rec="true">
+            <component :is="iconMap.plus" />
+          </span>
+        </NcButton>
       </div>
 
       <div v-if="pagination.total > 10" class="flex items-center justify-center mt-5">

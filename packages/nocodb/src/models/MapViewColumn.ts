@@ -3,6 +3,7 @@ import View from '~/models/View';
 import Noco from '~/Noco';
 import NocoCache from '~/cache/NocoCache';
 import { CacheGetType, CacheScope, MetaTable } from '~/utils/globals';
+import { extractProps } from '~/helpers/extractProps';
 
 export default class MapViewColumn {
   id: string;
@@ -57,27 +58,21 @@ export default class MapViewColumn {
       insertObj.source_id = viewRef.source_id;
     }
 
-    const { id, fk_column_id } = await ncMeta.metaInsert2(
+    const { id } = await ncMeta.metaInsert2(
       null,
       null,
       MetaTable.MAP_VIEW_COLUMNS,
       insertObj,
     );
 
-    await NocoCache.set(`${CacheScope.MAP_VIEW_COLUMN}:${fk_column_id}`, id);
-
-    // if cache is not present skip pushing it into the list to avoid unexpected behaviour
-    const { list } = await NocoCache.getList(CacheScope.MAP_VIEW_COLUMN, [
-      column.fk_view_id,
-    ]);
-    if (list?.length)
+    return this.get(id, ncMeta).then(async (viewCol) => {
       await NocoCache.appendToList(
         CacheScope.MAP_VIEW_COLUMN,
         [column.fk_view_id],
         `${CacheScope.MAP_VIEW_COLUMN}:${id}`,
       );
-
-    return this.get(id, ncMeta);
+      return viewCol;
+    });
   }
 
   public static async list(
@@ -106,5 +101,43 @@ export default class MapViewColumn {
         (b.order != null ? b.order : Infinity),
     );
     return views?.map((v) => new MapViewColumn(v));
+  }
+
+  // todo: update prop names
+  static async update(
+    columnId: string,
+    body: Partial<MapViewColumn>,
+    ncMeta = Noco.ncMeta,
+  ) {
+    const updateObj = extractProps(body, [
+      'order',
+      'show',
+      'width',
+      'group_by',
+      'group_by_order',
+      'group_by_sort',
+    ]);
+
+    // set meta
+    const res = await ncMeta.metaUpdate(
+      null,
+      null,
+      MetaTable.MAP_VIEW_COLUMNS,
+      updateObj,
+      columnId,
+    );
+
+    // get existing cache
+    const key = `${CacheScope.MAP_VIEW_COLUMN}:${columnId}`;
+    await NocoCache.update(key, updateObj);
+
+    // on view column update, delete any optimised single query cache
+    {
+      const viewCol = await this.get(columnId, ncMeta);
+      const view = await View.get(viewCol.fk_view_id, ncMeta);
+      await View.clearSingleQueryCache(view.fk_model_id, [view]);
+    }
+
+    return res;
   }
 }

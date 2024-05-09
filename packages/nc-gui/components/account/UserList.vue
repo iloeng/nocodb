@@ -1,8 +1,6 @@
 <script lang="ts" setup>
 import { OrgUserRoles } from 'nocodb-sdk'
 import type { OrgUserReqType, RequestParams, UserType } from 'nocodb-sdk'
-import type { User } from '#imports'
-import { extractSdkResponseErrorMsg, iconMap, useApi, useCopy, useDashboard, useDebounceFn, useNuxtApp } from '#imports'
 
 const { api, isLoading } = useApi()
 
@@ -19,7 +17,13 @@ const { user: loggedInUser } = useGlobal()
 
 const { copy } = useCopy()
 
+const { sorts, loadSorts, handleGetSortedData, toggleSort } = useUserSorts('Org')
+
 const users = ref<UserType[]>([])
+
+const sortedUsers = computed(() => {
+  return handleGetSortedData(users.value, sorts.value) as UserType[]
+})
 
 const currentPage = ref(1)
 
@@ -64,6 +68,7 @@ const loadUsers = useDebounceFn(async (page = currentPage.value, limit = current
 
 onMounted(() => {
   loadUsers()
+  loadSorts()
 })
 
 const updateRole = async (userId: string, roles: string) => {
@@ -72,6 +77,12 @@ const updateRole = async (userId: string, roles: string) => {
       roles,
     } as OrgUserReqType)
     message.success(t('msg.success.roleUpdated'))
+
+    users.value.forEach((user) => {
+      if (user.id === userId) {
+        user.roles = roles
+      }
+    })
 
     $e('a:org-user:role-updated', { role: roles })
   } catch (e: any) {
@@ -176,10 +187,22 @@ const openDeleteModal = (user: UserType) => {
       </div>
       <div class="w-full rounded-md max-w-250 h-[calc(100%-12rem)] rounded-md overflow-hidden mt-5">
         <div class="flex w-full bg-gray-50 border-1 rounded-t-md">
-          <div class="py-3.5 text-gray-500 font-medium text-3.5 w-2/3 text-start pl-6" data-rec="true">
-            {{ $t('labels.email') }}
-          </div>
-          <div class="py-3.5 text-gray-500 font-medium text-3.5 w-1/3 text-start" data-rec="true">{{ $t('objects.role') }}</div>
+          <LazyAccountHeaderWithSorter
+            class="py-3.5 text-gray-500 font-medium text-3.5 w-2/3 text-start pl-6"
+            :header="$t('objects.users')"
+            :active-sort="sorts"
+            field="email"
+            :toggle-sort="toggleSort"
+          />
+
+          <LazyAccountHeaderWithSorter
+            class="py-3.5 text-gray-500 font-medium text-3.5 w-1/3 text-start"
+            :header="$t('general.access')"
+            :active-sort="sorts"
+            field="roles"
+            :toggle-sort="toggleSort"
+          />
+
           <div class="flex py-3.5 text-gray-500 font-medium text-3.5 w-28 justify-end mr-4" data-rec="true">
             {{ $t('labels.action') }}
           </div>
@@ -193,7 +216,7 @@ const openDeleteModal = (user: UserType) => {
         </div>
         <section v-else class="tbody h-[calc(100%-4rem)] nc-scrollbar-md border-t-0 !overflow-auto">
           <div
-            v-for="el of users"
+            v-for="el of sortedUsers"
             :key="el.id"
             data-testid="nc-token-list"
             class="user flex py-3 justify-around px-1 border-b-1 border-l-1 border-r-1"
@@ -202,7 +225,15 @@ const openDeleteModal = (user: UserType) => {
             }"
           >
             <div class="text-3.5 text-start w-2/3 pl-5 flex items-center">
-              <GeneralTruncateText length="29">
+              <NcTooltip v-if="el.display_name">
+                <template #title>
+                  {{ el.email }}
+                </template>
+                <GeneralTruncateText :length="29">
+                  {{ el.display_name }}
+                </GeneralTruncateText>
+              </NcTooltip>
+              <GeneralTruncateText v-else :length="29">
                 {{ el.email }}
               </GeneralTruncateText>
             </div>
@@ -211,7 +242,7 @@ const openDeleteModal = (user: UserType) => {
                 {{ $t('labels.superAdmin') }}
               </div>
               <NcSelect
-                v-else
+                v-else-if="el.id !== loggedInUser?.id"
                 v-model:value="el.roles"
                 class="w-55 nc-user-roles"
                 :dropdown-match-select-width="false"
@@ -232,9 +263,9 @@ const openDeleteModal = (user: UserType) => {
                       class="w-4 h-4 text-primary"
                     />
                   </div>
-                  <span class="text-gray-500 text-xs whitespace-normal" data-rec="true">
+                  <div class="text-gray-500 text-xs whitespace-normal" data-rec="true">
                     {{ $t('msg.info.roles.orgCreator') }}
-                  </span>
+                  </div>
                 </a-select-option>
 
                 <a-select-option
@@ -251,11 +282,14 @@ const openDeleteModal = (user: UserType) => {
                       class="w-4 h-4 text-primary"
                     />
                   </div>
-                  <span class="text-gray-500 text-xs whitespace-normal" data-rec="true">
+                  <div class="text-gray-500 text-xs whitespace-normal" data-rec="true">
                     {{ $t('msg.info.roles.orgViewer') }}
-                  </span>
+                  </div>
                 </a-select-option>
               </NcSelect>
+              <div v-else class="font-weight-bold" data-rec="true">
+                {{ $t(`objects.roleType.orgLevelCreator`) }}
+              </div>
             </div>
             <span class="w-26 flex items-center justify-end mr-4">
               <div
@@ -300,6 +334,18 @@ const openDeleteModal = (user: UserType) => {
                 </NcDropdown>
               </div>
             </span>
+          </div>
+          <div
+            v-if="sortedUsers.length === 1"
+            class="user pt-12 pb-4 px-2 flex flex-col items-center gap-6 text-center border-b-1 border-l-1 border-r-1"
+          >
+            <div class="text-2xl text-gray-800 font-bold">
+              {{ $t('placeholder.inviteYourTeam') }}
+            </div>
+            <div class="text-sm text-gray-700">
+              {{ $t('placeholder.inviteYourTeamLabel') }}
+            </div>
+            <img src="~assets/img/placeholder/invite-team.png" class="!w-[30rem] flex-none" />
           </div>
         </section>
       </div>

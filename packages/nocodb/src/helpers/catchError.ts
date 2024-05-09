@@ -1,5 +1,9 @@
-import type { NextFunction, Request, Response } from 'express';
+import { NcErrorType } from 'nocodb-sdk';
+import { Logger } from '@nestjs/common';
 import type { ErrorObject } from 'ajv';
+import { defaultLimitConfig } from '~/helpers/extractLimitAndOffset';
+
+const dbErrorLogger = new Logger('MissingDBError');
 
 export enum DBError {
   TABLE_EXIST = 'TABLE_EXIST',
@@ -13,16 +17,15 @@ export enum DBError {
 
 // extract db errors using database error code
 export function extractDBError(error): {
-  type: DBError;
   message: string;
-  info: any;
-  extra?: Record<string, any>;
+  error: string;
+  details?: any;
 } | void {
   if (!error.code) return;
 
   let message: string;
-  let extra: Record<string, any>;
-  let type: DBError;
+  let _extra: Record<string, any>;
+  let _type: DBError;
 
   // todo: handle not null constraint error for all databases
   switch (error.code) {
@@ -36,7 +39,7 @@ export function extractDBError(error): {
           ? error.message.match(/FOREIGN KEY|UNIQUE/gi)?.join(' ')
           : 'constraint';
         message = `A ${constraint} constraint was violated: ${error.message}`;
-        extra = {
+        _extra = {
           constraint,
         };
       }
@@ -68,25 +71,25 @@ export function extractDBError(error): {
 
         if (noSuchTableMatch && noSuchTableMatch[1]) {
           message = `The table '${noSuchTableMatch[1]}' does not exist.`;
-          type = DBError.TABLE_NOT_EXIST;
-          extra = {
+          _type = DBError.TABLE_NOT_EXIST;
+          _extra = {
             table: noSuchTableMatch[1],
           };
         } else if (tableAlreadyExistsMatch && tableAlreadyExistsMatch[1]) {
           message = `The table '${tableAlreadyExistsMatch[1]}' already exists.`;
-          type = DBError.TABLE_EXIST;
-          extra = {
+          _type = DBError.TABLE_EXIST;
+          _extra = {
             table: tableAlreadyExistsMatch[1],
           };
         } else if (unrecognizedTokenMatch && unrecognizedTokenMatch[1]) {
           message = `Unrecognized token: ${unrecognizedTokenMatch[1]}`;
-          extra = {
+          _extra = {
             token: unrecognizedTokenMatch[1],
           };
         } else if (columnDoesNotExistMatch && columnDoesNotExistMatch[1]) {
           message = `The column ${columnDoesNotExistMatch[1]} does not exist.`;
-          type = DBError.COLUMN_NOT_EXIST;
-          extra = {
+          _type = DBError.COLUMN_NOT_EXIST;
+          _extra = {
             column: columnDoesNotExistMatch[1],
           };
         } else if (constraintFailedMatch && constraintFailedMatch[1]) {
@@ -96,8 +99,8 @@ export function extractDBError(error): {
           duplicateColumnExistsMatch[1]
         ) {
           message = `The column '${duplicateColumnExistsMatch[1]}' already exists.`;
-          type = DBError.COLUMN_EXIST;
-          extra = {
+          _type = DBError.COLUMN_EXIST;
+          _extra = {
             column: duplicateColumnExistsMatch[1],
           };
         } else {
@@ -125,8 +128,8 @@ export function extractDBError(error): {
         );
         if (extractTableNameMatch && extractTableNameMatch[1]) {
           message = `The table '${extractTableNameMatch[1]}' already exists.`;
-          type = DBError.TABLE_EXIST;
-          extra = {
+          _type = DBError.TABLE_EXIST;
+          _extra = {
             table: extractTableNameMatch[1],
           };
         }
@@ -141,8 +144,8 @@ export function extractDBError(error): {
         );
         if (extractColumnNameMatch && extractColumnNameMatch[1]) {
           message = `The column '${extractColumnNameMatch[1]}' already exists.`;
-          type = DBError.COLUMN_EXIST;
-          extra = {
+          _type = DBError.COLUMN_EXIST;
+          _extra = {
             column: extractColumnNameMatch[1],
           };
         }
@@ -158,8 +161,8 @@ export function extractDBError(error): {
         );
         if (missingTableMatch && missingTableMatch[1]) {
           message = `The table '${missingTableMatch[1]}' does not exist`;
-          type = DBError.TABLE_NOT_EXIST;
-          extra = {
+          _type = DBError.TABLE_NOT_EXIST;
+          _extra = {
             table: missingTableMatch[1],
           };
         }
@@ -183,8 +186,8 @@ export function extractDBError(error): {
         );
         if (extractColNameMatch && extractColNameMatch[1]) {
           message = `The column '${extractColNameMatch[1]}' cannot be null.`;
-          type = DBError.COLUMN_NOT_NULL;
-          extra = {
+          _type = DBError.COLUMN_NOT_NULL;
+          _extra = {
             column: extractColNameMatch[1],
           };
         }
@@ -202,8 +205,8 @@ export function extractDBError(error): {
         );
         if (extractColNameMatch && extractColNameMatch[1]) {
           message = `The column '${extractColNameMatch[1]}' does not exist.`;
-          type = DBError.COLUMN_NOT_EXIST;
-          extra = {
+          _type = DBError.COLUMN_NOT_EXIST;
+          _extra = {
             column: extractColNameMatch[1],
           };
         }
@@ -250,6 +253,9 @@ export function extractDBError(error): {
     case '23506':
       message = 'This record is being referenced by other records.';
       break;
+    case '3D000':
+      message = 'The database does not exist.';
+      break;
     case '42P07':
       message = 'The table already exists.';
       if (error.message) {
@@ -258,8 +264,8 @@ export function extractDBError(error): {
         );
         if (extractTableNameMatch && extractTableNameMatch[1]) {
           message = `The table '${extractTableNameMatch[1]}' already exists.`;
-          type = DBError.TABLE_EXIST;
-          extra = {
+          _type = DBError.TABLE_EXIST;
+          _extra = {
             table: extractTableNameMatch[1],
           };
         }
@@ -273,8 +279,8 @@ export function extractDBError(error): {
         );
         if (extractTableNameMatch && extractTableNameMatch[1]) {
           message = `The column '${extractTableNameMatch[1]}' already exists.`;
-          type = DBError.COLUMN_EXIST;
-          extra = {
+          _type = DBError.COLUMN_EXIST;
+          _extra = {
             column: extractTableNameMatch[1],
           };
         }
@@ -288,8 +294,8 @@ export function extractDBError(error): {
         );
         if (extractTableNameMatch && extractTableNameMatch[1]) {
           message = `The table '${extractTableNameMatch[1]}' does not exist.`;
-          type = DBError.TABLE_NOT_EXIST;
-          extra = {
+          _type = DBError.TABLE_NOT_EXIST;
+          _extra = {
             table: extractTableNameMatch[1],
           };
         }
@@ -303,8 +309,8 @@ export function extractDBError(error): {
         );
         if (extractTableNameMatch && extractTableNameMatch[1]) {
           message = `The column '${extractTableNameMatch[1]}' does not exist.`;
-          type = DBError.COLUMN_NOT_EXIST;
-          extra = {
+          _type = DBError.COLUMN_NOT_EXIST;
+          _extra = {
             column: extractTableNameMatch[1],
           };
         }
@@ -329,26 +335,26 @@ export function extractDBError(error): {
 
         if (extractTableNameMatch && extractTableNameMatch[1]) {
           message = `The table '${extractTableNameMatch[1]}' already exists.`;
-          type = DBError.TABLE_EXIST;
-          extra = {
+          _type = DBError.TABLE_EXIST;
+          _extra = {
             table: extractTableNameMatch[1],
           };
         } else if (extractDupColMatch && extractDupColMatch[1]) {
           message = `The column '${extractDupColMatch[1]}' already exists.`;
-          type = DBError.COLUMN_EXIST;
-          extra = {
+          _type = DBError.COLUMN_EXIST;
+          _extra = {
             column: extractDupColMatch[1],
           };
         } else if (extractMissingTableMatch && extractMissingTableMatch[1]) {
           message = `The table '${extractMissingTableMatch[1]}' does not exist`;
-          type = DBError.TABLE_NOT_EXIST;
-          extra = {
+          _type = DBError.TABLE_NOT_EXIST;
+          _extra = {
             table: extractMissingTableMatch[1],
           };
         } else if (extractMissingColMatch && extractMissingColMatch[1]) {
           message = `The column '${extractMissingColMatch[1]}' does not exist`;
-          type = DBError.COLUMN_NOT_EXIST;
-          extra = {
+          _type = DBError.COLUMN_NOT_EXIST;
+          _extra = {
             column: extractMissingColMatch[1],
           };
         }
@@ -372,69 +378,23 @@ export function extractDBError(error): {
     case 'EHOSTDOWN':
       message = 'The host is down.';
       break;
+    default:
+      // log error for unknown error code
+      dbErrorLogger.error(error);
+
+      // if error message contains -- then extract message after --
+      if (error.message && error.message.includes('--')) {
+        message = error.message.split('--')[1];
+      }
+      break;
   }
 
   if (message) {
     return {
+      error: NcErrorType.DATABASE_ERROR,
       message,
-      type,
-      extra,
-      info: { message: error.message, code: error.code },
     };
   }
-}
-
-export default function (
-  requestHandler: (req: Request, res: Response, next?: NextFunction) => any,
-) {
-  return async function (req: Request, res: Response, next?: NextFunction) {
-    try {
-      return await requestHandler(req, res, next);
-    } catch (e) {
-      // skip unnecessary error logging
-      if (
-        process.env.NC_ENABLE_ALL_API_ERROR_LOGGING === 'true' ||
-        !(
-          e instanceof BadRequest ||
-          e instanceof AjvError ||
-          e instanceof Unauthorized ||
-          e instanceof Forbidden ||
-          e instanceof NotFound ||
-          e instanceof NotImplemented ||
-          e instanceof UnprocessableEntity
-        )
-      )
-        console.log(requestHandler.name ? `${requestHandler.name} ::` : '', e);
-
-      const dbError = extractDBError(e);
-
-      if (dbError) {
-        return res.status(400).json(dbError);
-      }
-
-      if (e instanceof BadRequest) {
-        return res.status(400).json({ msg: e.message });
-      } else if (e instanceof Unauthorized) {
-        return res.status(401).json({ msg: e.message });
-      } else if (e instanceof Forbidden) {
-        return res.status(403).json({ msg: e.message });
-      } else if (e instanceof NotFound) {
-        return res.status(404).json({ msg: e.message });
-      } else if (e instanceof InternalServerError) {
-        return res.status(500).json({ msg: e.message });
-      } else if (e instanceof NotImplemented) {
-        return res.status(501).json({ msg: e.message });
-      } else if (e instanceof AjvError) {
-        return res.status(400).json({ msg: e.message, errors: e.errors });
-      } else if (e instanceof UnprocessableEntity) {
-        return res.status(422).json({ msg: e.message });
-      } else if (e instanceof NotAllowed) {
-        return res.status(405).json({ msg: e.message });
-      }
-      // if some other error occurs then send 500 and a generic message
-      res.status(500).json({ msg: 'Internal server error' });
-    }
-  };
 }
 
 export class NcBaseError extends Error {
@@ -453,9 +413,14 @@ export class Forbidden extends NcBaseError {}
 
 export class NotFound extends NcBaseError {}
 
-export class InternalServerError extends NcBaseError {}
+export class SsoError extends NcBaseError {}
 
-export class NotImplemented extends NcBaseError {}
+export class ExternalError extends NcBaseError {
+  constructor(error: Error) {
+    super(error.message);
+    Object.assign(this, error);
+  }
+}
 
 export class UnprocessableEntity extends NcBaseError {}
 
@@ -468,7 +433,275 @@ export class AjvError extends NcBaseError {
   errors: ErrorObject[];
 }
 
+const errorHelpers: {
+  [key in NcErrorType]: {
+    message: string | ((...params: string[]) => string);
+    code: number;
+  };
+} = {
+  [NcErrorType.UNKNOWN_ERROR]: {
+    message: 'Something went wrong',
+    code: 500,
+  },
+  [NcErrorType.INTERNAL_SERVER_ERROR]: {
+    message: (message: string) => message || `Internal server error`,
+    code: 500,
+  },
+  [NcErrorType.DATABASE_ERROR]: {
+    message: (message: string) =>
+      message || `There was an error while running the query`,
+    code: 500,
+  },
+  [NcErrorType.AUTHENTICATION_REQUIRED]: {
+    message: 'Authentication required to access this resource',
+    code: 401,
+  },
+  [NcErrorType.API_TOKEN_NOT_ALLOWED]: {
+    message: 'This request is not allowed with API token',
+    code: 401,
+  },
+  [NcErrorType.WORKSPACE_NOT_FOUND]: {
+    message: (id: string) => `Workspace '${id}' not found`,
+    code: 404,
+  },
+  [NcErrorType.BASE_NOT_FOUND]: {
+    message: (id: string) => `Base '${id}' not found`,
+    code: 404,
+  },
+  [NcErrorType.SOURCE_NOT_FOUND]: {
+    message: (id: string) => `Source '${id}' not found`,
+    code: 404,
+  },
+  [NcErrorType.TABLE_NOT_FOUND]: {
+    message: (id: string) => `Table '${id}' not found`,
+    code: 404,
+  },
+  [NcErrorType.VIEW_NOT_FOUND]: {
+    message: (id: string) => `View '${id}' not found`,
+    code: 404,
+  },
+  [NcErrorType.FIELD_NOT_FOUND]: {
+    message: (id: string) => `Field '${id}' not found`,
+    code: 404,
+  },
+  [NcErrorType.RECORD_NOT_FOUND]: {
+    message: (...ids: string[]) => {
+      const isMultiple = Array.isArray(ids) && ids.length > 1;
+      return `Record${isMultiple ? 's' : ''} '${ids.join(', ')}' not found`;
+    },
+    code: 404,
+  },
+  [NcErrorType.ERROR_DUPLICATE_RECORD]: {
+    message: (...ids: string[]) => {
+      const isMultiple = Array.isArray(ids) && ids.length > 1;
+      return `Record${isMultiple ? 's' : ''} '${ids.join(
+        ', ',
+      )}' already exists`;
+    },
+    code: 422,
+  },
+  [NcErrorType.USER_NOT_FOUND]: {
+    message: (idOrEmail: string) => {
+      const isEmail = idOrEmail.includes('@');
+      return `User ${
+        isEmail ? 'with email' : 'with id'
+      } '${idOrEmail}' not found`;
+    },
+    code: 404,
+  },
+  [NcErrorType.INVALID_OFFSET_VALUE]: {
+    message: (offset: string) => `Offset value '${offset}' is invalid`,
+    code: 422,
+  },
+  [NcErrorType.INVALID_LIMIT_VALUE]: {
+    message: `Limit value should be between ${defaultLimitConfig.limitMin} and ${defaultLimitConfig.limitMax}`,
+    code: 422,
+  },
+  [NcErrorType.INVALID_FILTER]: {
+    message: (filter: string) => `Filter '${filter}' is invalid`,
+    code: 422,
+  },
+  [NcErrorType.INVALID_SHARED_VIEW_PASSWORD]: {
+    message: 'Invalid shared view password',
+    code: 403,
+  },
+  [NcErrorType.NOT_IMPLEMENTED]: {
+    message: (feature: string) => `${feature} is not implemented`,
+    code: 501,
+  },
+  [NcErrorType.BAD_JSON]: {
+    message: 'Invalid JSON in request body',
+    code: 400,
+  },
+};
+
+function generateError(
+  type: NcErrorType,
+  args?: NcErrorArgs,
+): {
+  message: string;
+  code: number;
+  details?: any;
+} {
+  const errorHelper = errorHelpers[type];
+  const { params, customMessage, details } = args || {};
+
+  if (!errorHelper) {
+    return {
+      message: 'An error occurred',
+      code: 500,
+      details: details,
+    };
+  }
+
+  let message: string;
+  const messageHelper = customMessage || errorHelper.message;
+
+  if (typeof messageHelper === 'function') {
+    message = messageHelper(...(Array.isArray(params) ? params : [params]));
+  } else {
+    message = messageHelper;
+  }
+
+  return {
+    message,
+    code: errorHelper.code,
+    details: details,
+  };
+}
+
+type NcErrorArgs = {
+  params?: string | string[];
+  customMessage?: string | ((...args: string[]) => string);
+  details?: any;
+};
+
+export class NcBaseErrorv2 extends NcBaseError {
+  error: NcErrorType;
+  code: number;
+  details?: any;
+
+  constructor(error: NcErrorType, args?: NcErrorArgs) {
+    const errorHelper = generateError(error, args);
+    super(errorHelper.message);
+    this.error = error;
+    this.code = errorHelper.code;
+    this.details = args?.details;
+  }
+}
+
 export class NcError {
+  static authenticationRequired(args?: NcErrorArgs) {
+    throw new NcBaseErrorv2(NcErrorType.AUTHENTICATION_REQUIRED, args);
+  }
+
+  static apiTokenNotAllowed(args?: NcErrorArgs) {
+    throw new NcBaseErrorv2(NcErrorType.API_TOKEN_NOT_ALLOWED, args);
+  }
+
+  static workspaceNotFound(id: string, args?: NcErrorArgs) {
+    throw new NcBaseErrorv2(NcErrorType.WORKSPACE_NOT_FOUND, {
+      params: id,
+      ...args,
+    });
+  }
+
+  static baseNotFound(id: string, args?: NcErrorArgs) {
+    throw new NcBaseErrorv2(NcErrorType.BASE_NOT_FOUND, {
+      params: id,
+      ...args,
+    });
+  }
+
+  static sourceNotFound(id: string, args?: NcErrorArgs) {
+    throw new NcBaseErrorv2(NcErrorType.SOURCE_NOT_FOUND, {
+      params: id,
+      ...args,
+    });
+  }
+
+  static tableNotFound(id: string, args?: NcErrorArgs) {
+    throw new NcBaseErrorv2(NcErrorType.TABLE_NOT_FOUND, {
+      params: id,
+      ...args,
+    });
+  }
+
+  static userNotFound(id: string, args?: NcErrorArgs) {
+    throw new NcBaseErrorv2(NcErrorType.USER_NOT_FOUND, {
+      params: id,
+      ...args,
+    });
+  }
+
+  static viewNotFound(id: string, args?: NcErrorArgs) {
+    throw new NcBaseErrorv2(NcErrorType.VIEW_NOT_FOUND, {
+      params: id,
+      ...args,
+    });
+  }
+
+  static recordNotFound(id: string | string[], args?: NcErrorArgs) {
+    throw new NcBaseErrorv2(NcErrorType.RECORD_NOT_FOUND, {
+      params: id,
+      ...args,
+    });
+  }
+
+  static duplicateRecord(id: string | string[], args?: NcErrorArgs) {
+    throw new NcBaseErrorv2(NcErrorType.ERROR_DUPLICATE_RECORD, {
+      params: id,
+      ...args,
+    });
+  }
+
+  static fieldNotFound(id: string, args?: NcErrorArgs) {
+    throw new NcBaseErrorv2(NcErrorType.FIELD_NOT_FOUND, {
+      params: id,
+      ...args,
+    });
+  }
+
+  static invalidOffsetValue(offset: string | number, args?: NcErrorArgs) {
+    throw new NcBaseErrorv2(NcErrorType.INVALID_OFFSET_VALUE, {
+      params: `${offset}`,
+      ...args,
+    });
+  }
+
+  static invalidLimitValue(args?: NcErrorArgs) {
+    throw new NcBaseErrorv2(NcErrorType.INVALID_LIMIT_VALUE, {
+      ...args,
+    });
+  }
+
+  static invalidFilter(filter: string, args?: NcErrorArgs) {
+    throw new NcBaseErrorv2(NcErrorType.INVALID_FILTER, {
+      params: filter,
+      ...args,
+    });
+  }
+
+  static invalidSharedViewPassword(args?: NcErrorArgs) {
+    throw new NcBaseErrorv2(NcErrorType.INVALID_SHARED_VIEW_PASSWORD, {
+      ...args,
+    });
+  }
+
+  static notImplemented(feature: string = 'Feature', args?: NcErrorArgs) {
+    throw new NcBaseErrorv2(NcErrorType.NOT_IMPLEMENTED, {
+      params: feature,
+      ...args,
+    });
+  }
+
+  static internalServerError(message: string, args?: NcErrorArgs) {
+    throw new NcBaseErrorv2(NcErrorType.INTERNAL_SERVER_ERROR, {
+      params: message,
+      ...args,
+    });
+  }
+
   static notFound(message = 'Not found') {
     throw new NotFound(message);
   }
@@ -485,14 +718,6 @@ export class NcError {
     throw new Forbidden(message);
   }
 
-  static internalServerError(message = 'Internal server error') {
-    throw new InternalServerError(message);
-  }
-
-  static notImplemented(message = 'Not implemented') {
-    throw new NotImplemented(message);
-  }
-
   static ajvValidationError(param: { message: string; errors: ErrorObject[] }) {
     throw new AjvError(param);
   }
@@ -503,5 +728,11 @@ export class NcError {
 
   static notAllowed(message = 'Not allowed') {
     throw new NotAllowed(message);
+  }
+
+  static emailDomainNotAllowed(domain: string) {
+    throw new SsoError(
+      `Email domain ${domain} is not allowed for this organization`,
+    );
   }
 }

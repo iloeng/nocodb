@@ -4,6 +4,12 @@ export enum OrgUserRoles {
   VIEWER = 'org-level-viewer',
 }
 
+export enum CloudOrgUserRoles {
+  CREATOR = 'cloud-org-level-creator',
+  VIEWER = 'cloud-org-level-viewer',
+  OWNER = 'cloud-org-level-owner',
+}
+
 export enum ProjectRoles {
   OWNER = 'owner',
   CREATOR = 'creator',
@@ -19,6 +25,7 @@ export enum WorkspaceUserRoles {
   VIEWER = 'workspace-level-viewer',
   EDITOR = 'workspace-level-editor',
   COMMENTER = 'workspace-level-commenter',
+  NO_ACCESS = 'workspace-level-no-access',
 }
 
 export enum AppEvents {
@@ -136,6 +143,10 @@ export enum AppEvents {
   ATTACHMENT_UPLOAD = 'attachment.upload',
 
   APIS_CREATED = 'apis.created',
+
+  EXTENSION_CREATE = 'extension.create',
+  EXTENSION_UPDATE = 'extension.update',
+  EXTENSION_DELETE = 'extension.delete',
 }
 
 export enum ClickhouseTables {
@@ -167,6 +178,7 @@ export const RoleLabels = {
   [WorkspaceUserRoles.EDITOR]: 'editor',
   [WorkspaceUserRoles.COMMENTER]: 'commenter',
   [WorkspaceUserRoles.VIEWER]: 'viewer',
+  [WorkspaceUserRoles.NO_ACCESS]: 'noaccess',
   [ProjectRoles.OWNER]: 'owner',
   [ProjectRoles.CREATOR]: 'creator',
   [ProjectRoles.EDITOR]: 'editor',
@@ -176,6 +188,9 @@ export const RoleLabels = {
   [OrgUserRoles.SUPER_ADMIN]: 'superAdmin',
   [OrgUserRoles.CREATOR]: 'creator',
   [OrgUserRoles.VIEWER]: 'viewer',
+  [CloudOrgUserRoles.OWNER]: 'owner',
+  [CloudOrgUserRoles.CREATOR]: 'creator',
+  [CloudOrgUserRoles.VIEWER]: 'viewer',
 };
 
 export const RoleColors = {
@@ -184,6 +199,7 @@ export const RoleColors = {
   [WorkspaceUserRoles.EDITOR]: 'green',
   [WorkspaceUserRoles.COMMENTER]: 'orange',
   [WorkspaceUserRoles.VIEWER]: 'yellow',
+  [WorkspaceUserRoles.NO_ACCESS]: 'red',
   [ProjectRoles.OWNER]: 'purple',
   [ProjectRoles.CREATOR]: 'blue',
   [ProjectRoles.EDITOR]: 'green',
@@ -193,22 +209,30 @@ export const RoleColors = {
   [ProjectRoles.NO_ACCESS]: 'red',
   [OrgUserRoles.CREATOR]: 'blue',
   [OrgUserRoles.VIEWER]: 'yellow',
+  [CloudOrgUserRoles.OWNER]: 'purple',
+  [CloudOrgUserRoles.CREATOR]: 'blue',
+  [CloudOrgUserRoles.VIEWER]: 'yellow',
 };
 
 export const RoleDescriptions = {
   [WorkspaceUserRoles.OWNER]: 'Full access to workspace',
-  [WorkspaceUserRoles.CREATOR]: 'Can create bases, sync tables, views, setup web-hooks and more',
+  [WorkspaceUserRoles.CREATOR]:
+    'Can create bases, sync tables, views, setup web-hooks and more',
   [WorkspaceUserRoles.EDITOR]: 'Can edit data in workspace bases',
-  [WorkspaceUserRoles.COMMENTER]: 'Can view and comment data in workspace bases',
+  [WorkspaceUserRoles.COMMENTER]:
+    'Can view and comment data in workspace bases',
   [WorkspaceUserRoles.VIEWER]: 'Can view data in workspace bases',
+  [WorkspaceUserRoles.NO_ACCESS]: 'Cannot access this workspace',
   [ProjectRoles.OWNER]: 'Full access to base',
-  [ProjectRoles.CREATOR]: 'Can create tables, views, setup webhook, invite collaborators and more',
+  [ProjectRoles.CREATOR]:
+    'Can create tables, views, setup webhook, invite collaborators and more',
   [ProjectRoles.EDITOR]: 'Can view, add & modify records, add comments on them',
   [ProjectRoles.COMMENTER]: 'Can view records and add comment on them',
   [ProjectRoles.VIEWER]: 'Can only view records',
   [ProjectRoles.NO_ACCESS]: 'Cannot access this base',
   [OrgUserRoles.SUPER_ADMIN]: 'Full access to all',
-  [OrgUserRoles.CREATOR]: 'Can create bases, sync tables, views, setup web-hooks and more',
+  [OrgUserRoles.CREATOR]:
+    'Can create bases, sync tables, views, setup web-hooks and more',
   [OrgUserRoles.VIEWER]: 'Can only view bases',
 };
 
@@ -218,6 +242,7 @@ export const RoleIcons = {
   [WorkspaceUserRoles.EDITOR]: 'role_editor',
   [WorkspaceUserRoles.COMMENTER]: 'role_commenter',
   [WorkspaceUserRoles.VIEWER]: 'role_viewer',
+  [WorkspaceUserRoles.NO_ACCESS]: 'role_no_access',
   [ProjectRoles.OWNER]: 'role_owner',
   [ProjectRoles.CREATOR]: 'role_creator',
   [ProjectRoles.EDITOR]: 'role_editor',
@@ -227,6 +252,10 @@ export const RoleIcons = {
   [OrgUserRoles.SUPER_ADMIN]: 'role_super',
   [OrgUserRoles.CREATOR]: 'role_creator',
   [OrgUserRoles.VIEWER]: 'role_viewer',
+
+  [CloudOrgUserRoles.OWNER]: 'role_owner',
+  [CloudOrgUserRoles.CREATOR]: 'role_creator',
+  [CloudOrgUserRoles.VIEWER]: 'role_viewer',
 };
 
 export const WorkspaceRolesToProjectRoles = {
@@ -235,6 +264,7 @@ export const WorkspaceRolesToProjectRoles = {
   [WorkspaceUserRoles.EDITOR]: ProjectRoles.EDITOR,
   [WorkspaceUserRoles.COMMENTER]: ProjectRoles.COMMENTER,
   [WorkspaceUserRoles.VIEWER]: ProjectRoles.VIEWER,
+  [WorkspaceUserRoles.NO_ACCESS]: ProjectRoles.NO_ACCESS,
 };
 
 export const OrderedWorkspaceRoles = [
@@ -243,8 +273,13 @@ export const OrderedWorkspaceRoles = [
   WorkspaceUserRoles.EDITOR,
   WorkspaceUserRoles.COMMENTER,
   WorkspaceUserRoles.VIEWER,
-  // placeholder for no access
-  null,
+  WorkspaceUserRoles.NO_ACCESS,
+];
+
+export const OrderedOrgRoles = [
+  OrgUserRoles.SUPER_ADMIN,
+  OrgUserRoles.CREATOR,
+  OrgUserRoles.VIEWER,
 ];
 
 export const OrderedProjectRoles = [
@@ -280,4 +315,10 @@ export enum PlanLimitTypes {
   // PER VIEW
   FILTER_LIMIT = 'FILTER_LIMIT',
   SORT_LIMIT = 'SORT_LIMIT',
+}
+
+export enum APIContext {
+  VIEW_COLUMNS = 'fields',
+  FILTERS = 'filters',
+  SORTS = 'sorts',
 }

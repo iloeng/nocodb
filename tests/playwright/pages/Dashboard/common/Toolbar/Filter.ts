@@ -131,7 +131,7 @@ export class ToolbarFilterPage extends BasePage {
     skipWaitingResponse = true;
 
     const selectedField = await getTextExcludeIconText(
-      this.rootPage.locator('.nc-filter-field-select .ant-select-selection-item')
+      this.rootPage.locator('.nc-filter-field-select .ant-select-selection-item').first()
     );
     if (selectedField !== title) {
       await this.rootPage.locator('.nc-filter-field-select').last().click();
@@ -288,14 +288,7 @@ export class ToolbarFilterPage extends BasePage {
             .click();
           break;
         case UITypes.MultiSelect:
-          await this.get()
-            .locator('.nc-filter-value-select')
-            .click({
-              position: {
-                x: 1,
-                y: 1,
-              },
-            });
+          await this.get().locator('.nc-filter-value-select').locator('.ant-select-arrow').click({ force: true });
           // eslint-disable-next-line no-case-declarations
           const v = value.split(',');
           for (let i = 0; i < v.length; i++) {
@@ -306,14 +299,12 @@ export class ToolbarFilterPage extends BasePage {
           }
           break;
         case UITypes.SingleSelect:
-          await this.get()
-            .locator('.nc-filter-value-select')
-            .click({
-              position: {
-                x: 1,
-                y: 1,
-              },
-            });
+          // for single select field, the drop select arrow is visible only for some operations
+          if ((await this.get().locator('.nc-filter-value-select').locator('.ant-select-arrow').count()) > 0) {
+            await this.get().locator('.nc-filter-value-select').locator('.ant-select-arrow').click({ force: true });
+          } else {
+            await this.get().locator('.nc-filter-value-select').click({ force: true });
+          }
           // check if value was an array
           // eslint-disable-next-line no-case-declarations
           const val = value.split(',');
@@ -333,14 +324,7 @@ export class ToolbarFilterPage extends BasePage {
           break;
         case UITypes.User:
           if (!['is blank', 'is not blank'].includes(operation)) {
-            await this.get()
-              .locator('.nc-filter-value-select')
-              .click({
-                position: {
-                  x: 1,
-                  y: 1,
-                },
-              });
+            await this.get().locator('.nc-filter-value-select').locator('.ant-select-arrow').click({ force: true });
 
             const v = value.split(',');
             for (let i = 0; i < v.length; i++) {
@@ -348,13 +332,16 @@ export class ToolbarFilterPage extends BasePage {
                 .locator(`.nc-dropdown-user-select-cell`)
                 .getByTestId('select-option-User-filter')
                 .getByText(v[i])
-                .click();
+                .click({ force: true });
             }
           }
           break;
 
         default:
-          fillFilter = () => this.rootPage.locator('.nc-filter-value-select > input').last().fill(value);
+          fillFilter = async () => {
+            await this.rootPage.locator('.nc-filter-value-select > input').last().clear({ force: true });
+            return this.rootPage.locator('.nc-filter-value-select > input').last().fill(value);
+          };
           await this.waitForResponse({
             uiAction: fillFilter,
             httpMethodsToMatch: ['GET'],

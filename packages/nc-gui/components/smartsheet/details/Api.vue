@@ -2,22 +2,6 @@
 import HTTPSnippet from 'httpsnippet'
 import { LoadingOutlined } from '@ant-design/icons-vue'
 
-import {
-  ActiveViewInj,
-  MetaInj,
-  inject,
-  message,
-  ref,
-  storeToRefs,
-  useBase,
-  useCopy,
-  useGlobal,
-  useI18n,
-  useSmartsheetStoreOrThrow,
-  useViewData,
-  watch,
-} from '#imports'
-
 const { t } = useI18n()
 
 const baseStore = useBase()
@@ -82,11 +66,7 @@ const selectedClient = ref<string | undefined>(langs[0].clients && langs[0].clie
 const selectedLangName = ref(langs[0].name)
 
 const apiUrl = computed(
-  () =>
-    new URL(
-      `/api/v1/db/data/noco/${base.value?.id}/${meta.value?.id}/views/${view.value?.id}`,
-      (appInfo.value && appInfo.value.ncSiteUrl) || '/',
-    ).href,
+  () => new URL(`/api/v2/tables/${meta.value?.id}/records`, (appInfo.value && appInfo.value.ncSiteUrl) || '/').href,
 )
 
 const snippet = computed(
@@ -95,12 +75,15 @@ const snippet = computed(
       method: 'GET',
       headers: [{ name: 'xc-auth', value: token.value, comment: 'JWT Auth token' }],
       url: apiUrl.value,
-      queryString: Object.entries(queryParams.value || {}).map(([name, value]) => {
-        return {
-          name,
-          value: String(value),
-        }
-      }),
+      queryString: [
+        ...Object.entries(queryParams.value || {}).map(([name, value]) => {
+          return {
+            name,
+            value: String(value),
+          }
+        }),
+        { name: 'viewId', value: view.value?.id },
+      ],
     }),
 )
 

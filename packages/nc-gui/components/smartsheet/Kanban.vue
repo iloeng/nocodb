@@ -1,28 +1,6 @@
 <script lang="ts" setup>
 import Draggable from 'vuedraggable'
 import { ViewTypes, isVirtualCol } from 'nocodb-sdk'
-import {
-  ActiveViewInj,
-  FieldsInj,
-  IsFormInj,
-  IsGalleryInj,
-  IsGridInj,
-  IsKanbanInj,
-  IsLockedInj,
-  IsPublicInj,
-  MetaInj,
-  OpenNewRecordFormHookInj,
-  extractPkFromRow,
-  iconMap,
-  inject,
-  isImage,
-  onBeforeUnmount,
-  provide,
-  useAttachment,
-  useDebounceFn,
-  useKanbanViewStoreOrThrow,
-  useUndoRedo,
-} from '#imports'
 import type { Row as RowType } from '#imports'
 
 interface Attachment {
@@ -162,7 +140,7 @@ reloadViewMetaHook?.on(async () => {
 const expandForm = (row: RowType, state?: Record<string, any>) => {
   const rowId = extractPkFromRow(row.row, meta.value!.columns!)
 
-  if (rowId) {
+  if (rowId && !isPublic.value) {
     router.push({
       query: {
         ...route.value.query,
@@ -232,7 +210,7 @@ async function onMoveStack(event: any, undo = false) {
     const { fk_grp_col_id, meta: stack_meta } = kanbanMetaData.value
     groupingFieldColOptions.value[oldIndex].order = newIndex
     groupingFieldColOptions.value[newIndex].order = oldIndex
-    const stackMetaObj = JSON.parse(stack_meta as string) || {}
+    const stackMetaObj = parseProp(stack_meta) || {}
     stackMetaObj[fk_grp_col_id as string] = groupingFieldColOptions.value
     await updateKanbanMeta({
       meta: stackMetaObj,
@@ -291,7 +269,8 @@ const kanbanListScrollHandler = useDebounceFn(async (e: any) => {
     const stackTitle = e.target.getAttribute('data-stack-title')
     const pageSize = appInfo.value.defaultLimit || 25
     const stack = formattedData.value.get(stackTitle)
-    if (stack) {
+
+    if (stack && (countByStack.value.get(stackTitle) === undefined || stack.length < countByStack.value.get(stackTitle)!)) {
       const page = Math.ceil(stack.length / pageSize)
       await loadMoreKanbanData(stackTitle, { offset: page * pageSize })
     }
@@ -366,7 +345,7 @@ watch(
         // horizontally scroll to the end of the kanban container
         // when a new option is added within kanban view
         nextTick(() => {
-          if (shouldScrollToRight.value) {
+          if (shouldScrollToRight.value && kanbanContainerRef.value) {
             kanbanContainerRef.value.scrollTo({
               left: kanbanContainerRef.value.scrollWidth,
               behavior: 'smooth',
@@ -512,7 +491,10 @@ const getRowId = (row: RowType) => {
                     </div>
                   </a-layout-header>
 
-                  <a-layout-content class="overflow-y-hidden mt-1" style="max-height: calc(100% - 11rem)">
+                  <a-layout-content
+                    class="overflow-y-hidden mt-1"
+                    :style="{ maxHeight: isUIAllowed('dataInsert') ? 'calc(100% - 11rem)' : 'calc(100% - 8rem)' }"
+                  >
                     <div :ref="kanbanListRef" class="nc-kanban-list h-full nc-scrollbar-dark-md" :data-stack-title="stack.title">
                       <!-- Draggable Record Card -->
                       <Draggable
@@ -593,7 +575,7 @@ const getRowId = (row: RowType) => {
                                   <LazySmartsheetVirtualCell
                                     v-if="isVirtualCol(displayField)"
                                     v-model="record.row[displayField.title]"
-                                    class="!text-gray-600"
+                                    class="!text-brand-500"
                                     :column="displayField"
                                     :row="record"
                                   />
@@ -601,7 +583,7 @@ const getRowId = (row: RowType) => {
                                   <LazySmartsheetCell
                                     v-else
                                     v-model="record.row[displayField.title]"
-                                    class="!text-gray-600"
+                                    class="!text-brand-500"
                                     :column="displayField"
                                     :edit-enabled="false"
                                     :read-only="true"
@@ -664,6 +646,7 @@ const getRowId = (row: RowType) => {
                       </div>
 
                       <div
+                        v-if="isUIAllowed('dataInsert')"
                         class="flex flex-row w-full mt-3 justify-between items-center cursor-pointer bg-white px-4 py-2 rounded-lg border-gray-100 border-1 shadow-sm shadow-gray-100"
                         @click="
                           () => {
@@ -752,7 +735,7 @@ const getRowId = (row: RowType) => {
 
   <Suspense>
     <LazySmartsheetExpandedForm
-      v-if="expandedFormOnRowIdDlg"
+      v-if="expandedFormOnRowIdDlg && meta?.id"
       :key="route.query.rowId"
       v-model="expandedFormOnRowIdDlg"
       :row="{ row: {}, oldRow: {}, rowMeta: {} }"

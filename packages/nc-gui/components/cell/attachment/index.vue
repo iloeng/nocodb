@@ -2,25 +2,6 @@
 import { onKeyDown } from '@vueuse/core'
 import { useProvideAttachmentCell } from './utils'
 import { useSortable } from './sort'
-import {
-  ActiveCellInj,
-  CurrentCellInj,
-  DropZoneRef,
-  IsExpandedFormOpenInj,
-  IsGalleryInj,
-  IsKanbanInj,
-  RowHeightInj,
-  iconMap,
-  inject,
-  isImage,
-  ref,
-  useAttachment,
-  useDropZone,
-  useSelectedCellKeyupListener,
-  useSmartsheetRowStoreOrThrow,
-  useSmartsheetStoreOrThrow,
-  watch,
-} from '#imports'
 
 interface Props {
   modelValue?: string | Record<string, any>[] | null
@@ -49,6 +30,10 @@ const isKanban = inject(IsKanbanInj, ref(false))
 
 const isExpandedForm = inject(IsExpandedFormOpenInj, ref(false))
 
+const isSurveyForm = inject(IsSurveyFormInj, ref(false))
+
+const isGrid = inject(IsGridInj, ref(false))
+
 const { isSharedForm } = useSmartsheetStoreOrThrow()!
 
 const { isMobileMode } = useGlobal()
@@ -69,6 +54,7 @@ const {
   selectedImage,
   isReadonly,
   storedFiles,
+  removeFile,
 } = useProvideAttachmentCell(updateModelValue)
 
 const { dragging } = useSortable(sortableRef, visibleItems, updateModelValue, isReadonly)
@@ -175,13 +161,51 @@ const onImageClick = (item: any) => {
 
   selectedImage.value = item
 }
+
+const keydownEnter = (e: KeyboardEvent) => {
+  if (!isSurveyForm.value) {
+    open(e)
+    e.stopPropagation()
+  }
+}
+const keydownSpace = (e: KeyboardEvent) => {
+  if (isSurveyForm.value) {
+    open(e)
+    e.stopPropagation()
+  }
+}
+
+const { isUIAllowed } = useRoles()
+const isConfirmModalOpen = ref(false)
+const filetoDelete = reactive({
+  title: '',
+  i: 0,
+})
+
+function onRemoveFileClick(title: any, i: number) {
+  isConfirmModalOpen.value = true
+  filetoDelete.i = i
+  filetoDelete.title = title
+}
+
+const handleFileDelete = (i: number) => {
+  removeFile(i)
+  isConfirmModalOpen.value = false
+  filetoDelete.i = 0
+  filetoDelete.title = ''
+}
 </script>
 
 <template>
   <div
     ref="attachmentCellRef"
     :style="{
-      height: isForm || isExpandedForm ? undefined : `max(${(rowHeight || 1) * 1.8}rem, 41px)`,
+      height:
+        isForm || isExpandedForm
+          ? undefined
+          : `max(${!rowHeight || rowHeight === 1 ? rowHeightInPx['1'] - 10 : rowHeightInPx[`${rowHeight}`] - 18}px, ${
+              isGrid ? '22px' : '32px'
+            })`,
     }"
     class="nc-attachment-cell relative flex color-transition flex items-center w-full xs:(min-h-12 max-h-32)"
     :class="{ 'justify-center': !active, 'justify-between': active, 'px-2': isExpandedForm }"
@@ -208,7 +232,8 @@ const onImageClick = (item: any) => {
       data-testid="attachment-cell-file-picker-button"
       tabindex="0"
       @click="open"
-      @keydown.enter="open"
+      @keydown.enter="keydownEnter"
+      @keydown.space="keydownSpace"
     >
       <component :is="iconMap.reload" v-if="isLoading" :class="{ 'animate-infinite animate-spin': isLoading }" />
 
@@ -219,15 +244,15 @@ const onImageClick = (item: any) => {
 
         <div
           v-if="active || !visibleItems.length || (isForm && visibleItems.length)"
-          class="flex items-center gap-1 xs:(w-full min-w-12 h-8 justify-center)"
+          class="flex items-center gap-1 xs:(w-full min-w-12 h-7 justify-center)"
         >
           <MaterialSymbolsAttachFile
-            class="transform dark:(!text-white) group-hover:(!text-accent scale-120) text-gray-500 text-[0.75rem]"
+            class="transform dark:(!text-white) group-hover:(!text-accent scale-120) text-gray-500 text-tiny"
           />
           <div
             v-if="!visibleItems.length"
             data-rec="true"
-            class="group-hover:text-primary text-gray-500 dark:text-gray-200 dark:group-hover:!text-white text-xs xs:(justify-center rounded-lg text-sm)"
+            class="group-hover:text-primary text-gray-500 dark:text-gray-200 dark:group-hover:!text-white text-tiny xs:(justify-center rounded-lg text-sm)"
           >
             {{ $t('activity.addFiles') }}
           </div>
@@ -240,31 +265,36 @@ const onImageClick = (item: any) => {
     <template v-if="visibleItems.length">
       <div
         ref="sortableRef"
-        :class="{ 'justify-center': !isExpandedForm && !isGallery && !isKanban }"
-        class="flex cursor-pointer w-full items-center flex-wrap gap-2 py-1.5 scrollbar-thin-dull overflow-hidden mt-0 items-start"
+        :class="{
+          'justify-center': !isExpandedForm && !isGallery && !isKanban,
+          'py-1': rowHeight === 1 && !isForm && !isExpandedForm,
+          'py-1.5': rowHeight !== 1 || isForm || isExpandedForm,
+        }"
+        class="nc-attachment-wrapper flex cursor-pointer w-full items-center flex-wrap gap-2 scrollbar-thin-dull overflow-hidden mt-0 items-start"
         :style="{
-          maxHeight: isForm || isExpandedForm ? undefined : `max(${(rowHeight || 1) * 1.8}rem, 41px)`,
+          maxHeight: isForm || isExpandedForm ? undefined : `max(100%, ${isGrid ? '22px' : '32px'})`,
         }"
       >
         <template v-for="(item, i) of visibleItems" :key="item.url || item.title">
-          <NcTooltip placement="bottom">
+          <NcTooltip placement="bottom" class="nc-attachment-item">
             <template #title>
               <div class="text-center w-full">{{ item.title }}</div>
             </template>
             <div v-if="isImage(item.title, item.mimetype ?? item.type)">
               <div
-                class="nc-attachment flex items-center flex-col flex-wrap justify-center"
-                :class="{ 'ml-2': active }"
+                class="nc-attachment flex items-center flex-col flex-wrap justify-center flex-auto"
+                :class="{ 'ml-2': active, '!w-30': isForm || isExpandedForm }"
                 @click="() => onImageClick(item)"
               >
                 <LazyCellAttachmentImage
                   :alt="item.title || `#${i}`"
                   class="rounded"
                   :class="{
-                    'h-7.5 w-8.8': rowHeight === 1,
-                    'h-11.5 w-12.8': rowHeight === 2,
-                    'h-16.8 w-20.8': rowHeight === 4,
-                    'h-20.8 !w-30': isForm || isExpandedForm || rowHeight === 6,
+                    'h-5.5': !isGrid && (!rowHeight || rowHeight === 1),
+                    'h-4.5': isGrid && (!rowHeight || rowHeight === 1),
+                    'h-8': rowHeight === 2,
+                    'h-16.8': rowHeight === 4,
+                    'h-20.8': rowHeight === 6 || isForm || isExpandedForm,
                   }"
                   :srcs="getPossibleAttachmentSrc(item)"
                 />
@@ -272,14 +302,31 @@ const onImageClick = (item: any) => {
             </div>
             <div
               v-else
-              class="nc-attachment flex items-center justify-center"
-              :class="{ 'ml-2': active }"
+              class="nc-attachment flex items-center justify-center px-4"
+              :class="{
+                'h-5.5': !isGrid && (!rowHeight || rowHeight === 1),
+                'h-4.5': isGrid && (!rowHeight || rowHeight === 1),
+                'h-8': rowHeight === 2,
+                'h-16.8': rowHeight === 4,
+                'h-20.8 !w-30': rowHeight === 6 || isForm || isExpandedForm,
+                'ml-2': active,
+              }"
               @click="openAttachment(item)"
             >
-              <component :is="FileIcon(item.icon)" v-if="item.icon" />
+              <component :is="FileIcon(item.icon)" v-if="item.icon" :class="{ 'h-13 w-13': isForm || isExpandedForm }" />
 
-              <IcOutlineInsertDriveFile v-else />
+              <IcOutlineInsertDriveFile v-else :class="{ 'h-13 w-13': isForm || isExpandedForm }" />
             </div>
+
+            <a-tooltip v-if="isForm || isExpandedForm">
+              <template #title> {{ $t('title.removeFile') }} </template>
+              <component
+                :is="iconMap.closeCircle"
+                v-if="isSharedForm || (isUIAllowed('dataEdit') && !isPublic)"
+                class="nc-attachment-remove"
+                @click.stop="onRemoveFileClick(item.title, i)"
+              />
+            </a-tooltip>
           </NcTooltip>
         </template>
       </div>
@@ -290,12 +337,12 @@ const onImageClick = (item: any) => {
       >
         <component :is="iconMap.reload" v-if="isLoading" :class="{ 'animate-infinite animate-spin': isLoading }" />
 
-        <NcTooltip v-else placement="bottom">
+        <NcTooltip v-else placement="bottom" class="flex">
           <template #title> {{ $t('activity.viewAttachment') }}</template>
 
           <component
             :is="iconMap.expand"
-            class="transform dark:(!text-white) group-hover:(!text-grey-800 scale-120) text-gray-500 text-[0.75rem]"
+            class="flex-none transform dark:(!text-white) group-hover:(!text-grey-800 scale-120) text-gray-500 text-[2rem] h-3"
             @click.stop="onExpand"
           />
         </NcTooltip>
@@ -303,6 +350,27 @@ const onImageClick = (item: any) => {
     </template>
 
     <LazyCellAttachmentModal />
+
+    <LazyGeneralDeleteModal
+      v-if="isForm || isExpandedForm"
+      v-model:visible="isConfirmModalOpen"
+      entity-name="File"
+      :on-delete="() => handleFileDelete(filetoDelete.i)"
+    >
+      <template #entity-preview>
+        <span>
+          <div class="flex flex-row items-center py-2.25 px-2.5 bg-gray-50 rounded-lg text-gray-700 mb-4">
+            <GeneralIcon icon="file" class="nc-view-icon"></GeneralIcon>
+            <div
+              class="capitalize text-ellipsis overflow-hidden select-none w-full pl-1.75"
+              :style="{ wordBreak: 'keep-all', whiteSpace: 'nowrap', display: 'inline' }"
+            >
+              {{ filetoDelete.title }}
+            </div>
+          </div>
+        </span>
+      </template>
+    </LazyGeneralDeleteModal>
   </div>
 </template>
 
@@ -310,7 +378,7 @@ const onImageClick = (item: any) => {
 .nc-cell {
   .nc-attachment-cell {
     .nc-attachment {
-      @apply min-h-[1.8rem] min-w-[1.8rem] !ring-1 !ring-gray-300 !rounded;
+      @apply min-h-5.5 !ring-1 !ring-gray-300 !rounded;
     }
 
     .ghost,
@@ -322,6 +390,18 @@ const onImageClick = (item: any) => {
       .ant-tooltip {
         @apply !hidden;
       }
+    }
+  }
+  .nc-attachment-item {
+    @apply relative;
+
+    .nc-attachment-remove {
+      @apply absolute right-0.8 top-0.8 rounded hidden p-0.5 bg-white text-lg leading-none;
+      box-shadow: 0px 0px 4px #bbb;
+    }
+
+    &:hover .nc-attachment-remove {
+      @apply block;
     }
   }
 }

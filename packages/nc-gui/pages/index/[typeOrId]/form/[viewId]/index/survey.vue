@@ -2,23 +2,7 @@
 import type { ColumnType, LinkToAnotherRecordType } from 'nocodb-sdk'
 import { RelationTypes, UITypes, isVirtualCol } from 'nocodb-sdk'
 import { breakpointsTailwind } from '@vueuse/core'
-import {
-  DropZoneRef,
-  IsSurveyFormInj,
-  computed,
-  iconMap,
-  isValidURL,
-  onKeyStroke,
-  onMounted,
-  provide,
-  ref,
-  useBreakpoints,
-  useI18n,
-  usePointerSwipe,
-  useSharedFormStoreOrThrow,
-  useStepper,
-  validateEmail,
-} from '#imports'
+import tinycolor from 'tinycolor2'
 
 enum TransitionDirection {
   Left = 'left',
@@ -37,7 +21,7 @@ const { md } = useBreakpoints(breakpointsTailwind)
 const { v$, formState, formColumns, submitForm, submitted, secondsRemain, sharedFormView, sharedViewMeta, onReset } =
   useSharedFormStoreOrThrow()
 
-const { t } = useI18n()
+const { isMobileMode } = storeToRefs(useConfigStore())
 
 const isTransitioning = ref(false)
 
@@ -47,13 +31,19 @@ const animationTarget = ref<AnimationTarget>(AnimationTarget.ArrowRight)
 
 const isAnimating = ref(false)
 
+const isStarted = ref(false)
+
+const dialogShow = ref(false)
+
 const el = ref<HTMLDivElement>()
+
+const activeCell = ref<HTMLElement>()
 
 provide(DropZoneRef, el)
 
 provide(IsSurveyFormInj, ref(true))
 
-const transitionDuration = computed(() => sharedViewMeta.value.transitionDuration || 50)
+const transitionDuration = computed(() => sharedViewMeta.value.transitionDuration || 100)
 
 const steps = computed(() => {
   if (!formColumns.value) return []
@@ -73,7 +63,17 @@ const { index, goToPrevious, goToNext, isFirst, isLast, goTo } = useStepper(step
 
 const field = computed(() => formColumns.value?.[index.value])
 
-const columnValidationError = ref(false)
+const fieldHasError = computed(() => {
+  if (field.value?.title) {
+    if (isVirtualCol(field.value)) {
+      return v$.value.virtual[field.value.title]?.$error
+    } else {
+      return v$.value.localState[field.value.title]?.$error
+    }
+  }
+
+  return false
+})
 
 function isRequired(column: ColumnType, required = false) {
   let columnObj = column
@@ -116,41 +116,20 @@ function animate(target: AnimationTarget) {
   }, transitionDuration.value / 2)
 }
 
-async function validateColumn() {
-  const f = field.value!
-  if (parseProp(f.meta)?.validate && formState.value[f.title!]) {
-    if (f.uidt === UITypes.Email) {
-      if (!validateEmail(formState.value[f.title!])) {
-        columnValidationError.value = true
-        message.error(t('msg.error.invalidEmail'))
-        return false
-      }
-    } else if (f.uidt === UITypes.URL) {
-      if (!isValidURL(formState.value[f.title!])) {
-        columnValidationError.value = true
-        message.error(t('msg.error.invalidURL'))
-        return false
-      }
-    }
+const validateField = async (title: string, type: 'cell' | 'virtual') => {
+  const validationField = type === 'cell' ? v$.value.localState[title] : v$.value.virtual[title]
+
+  if (validationField) {
+    return await validationField.$validate()
+  } else {
+    return true
   }
-  return true
 }
 
 async function goNext(animationTarget?: AnimationTarget) {
-  columnValidationError.value = false
+  if (isLast.value || !isStarted.value || submitted.value || dialogShow.value || !field.value || !field.value.title) return
 
-  if (isLast.value || submitted.value) return
-
-  if (!field.value || !field.value.title) return
-
-  const validationField = v$.value.localState[field.value.title]
-
-  if (validationField) {
-    const isValid = await validationField.$validate()
-    if (!isValid) return
-  }
-
-  if (!(await validateColumn())) return
+  if (field.value?.title && !(await validateField(field.value.title, isVirtualCol(field.value) ? 'virtual' : 'cell'))) return
 
   animate(animationTarget || AnimationTarget.ArrowRight)
 
@@ -165,7 +144,7 @@ async function goNext(animationTarget?: AnimationTarget) {
 }
 
 async function goPrevious(animationTarget?: AnimationTarget) {
-  if (isFirst.value || submitted.value) return
+  if (isFirst.value || !isStarted.value || submitted.value || dialogShow.value) return
 
   animate(animationTarget || AnimationTarget.ArrowLeft)
 
@@ -178,11 +157,13 @@ function focusInput() {
   if (document && typeof document !== 'undefined') {
     const inputEl =
       (document.querySelector('.nc-cell input') as HTMLInputElement) ||
-      (document.querySelector('.nc-cell textarea') as HTMLTextAreaElement)
+      (document.querySelector('.nc-cell textarea') as HTMLTextAreaElement) ||
+      (document.querySelector('.nc-cell [tabindex="0"]') as HTMLElement)
 
     if (inputEl) {
-      inputEl.select()
-      inputEl.focus()
+      activeCell.value = inputEl
+      inputEl?.select?.()
+      inputEl?.focus?.()
     }
   }
 }
@@ -190,34 +171,87 @@ function focusInput() {
 function resetForm() {
   v$.value.$reset()
   submitted.value = false
+  isStarted.value = false
   transition(TransitionDirection.Right)
   goTo(steps.value[0])
 }
 
 async function submit() {
-  if (submitted.value || !(await validateColumn())) return
+  if (submitted.value) return
+  dialogShow.value = false
   submitForm()
 }
 
 onReset(resetForm)
 
+const onStart = () => {
+  isStarted.value = true
+
+  setTimeout(() => {
+    focusInput()
+  }, 100)
+}
+
+const handleFocus = () => {
+  if (document?.activeElement !== activeCell.value) {
+    focusInput()
+  }
+}
+
+const showSubmitConfirmModal = async () => {
+  if (field.value?.title && !(await validateField(field.value.title, isVirtualCol(field.value) ? 'virtual' : 'cell'))) {
+    return
+  }
+
+  dialogShow.value = true
+
+  setTimeout(() => {
+    // NcButton will only focus if document has already focused element
+    document.querySelector('.nc-survery-form__confirmation_modal div[tabindex="0"]')?.focus()
+    document.querySelector('.nc-survey-form-btn-submit.nc-button')?.focus()
+  }, 50)
+}
+
 onKeyStroke(['ArrowLeft', 'ArrowDown'], () => {
+  if (isMobileMode.value) return
+
   goPrevious(AnimationTarget.ArrowLeft)
 })
 onKeyStroke(['ArrowRight', 'ArrowUp'], () => {
+  if (isMobileMode.value) return
+
   goNext(AnimationTarget.ArrowRight)
 })
-onKeyStroke(['Enter', 'Space'], () => {
-  if (isLast.value) {
-    submit()
-  } else {
-    goNext(AnimationTarget.OkButton, true)
+onKeyStroke(['Enter'], async (e) => {
+  if (isMobileMode.value || submitted.value) return
+
+  if (!isStarted.value && !submitted.value) {
+    onStart()
+  } else if (isStarted.value) {
+    if (isLast.value) {
+      if (dialogShow.value) {
+        submit()
+      } else {
+        e.preventDefault()
+        showSubmitConfirmModal()
+      }
+    } else {
+      const activeElement = document.activeElement as HTMLElement
+
+      if (activeElement?.classList && activeElement.classList.contains('nc-survey-form__btn-next')) return
+
+      goNext(AnimationTarget.OkButton, true)
+    }
+  }
+})
+
+onKeyStroke('Escape', () => {
+  if (document) {
+    ;(document.activeElement as HTMLElement)?.blur?.()
   }
 })
 
 onMounted(() => {
-  focusInput()
-
   if (!md.value) {
     const { direction } = usePointerSwipe(el, {
       onSwipe: () => {
@@ -235,255 +269,300 @@ onMounted(() => {
 </script>
 
 <template>
-  <div ref="el" class="survey pt-8 md:p-0 w-full h-full flex flex-col">
-    <div
-      v-if="sharedFormView"
-      style="height: max(40vh, 225px); min-height: 225px"
-      class="max-w-[max(33%,600px)] mx-auto flex flex-col justify-end"
-    >
-      <div class="px-4 md:px-0 flex flex-col justify-end">
-        <h1 class="prose-2xl font-bold self-center my-4" data-testid="nc-survey-form__heading">
-          {{ sharedFormView.heading }}
-        </h1>
+  <div class="h-full">
+    <div class="survey md:p-0 w-full h-full flex flex-col max-w-[max(33%,688px)] mx-auto mb-4rem lg:mb-10rem">
+      <div v-if="sharedFormView" class="my-auto">
+        <template v-if="!isStarted || submitted">
+          <GeneralFormBanner
+            v-if="sharedFormView && !parseProp(sharedFormView?.meta).hide_banner"
+            :banner-image-url="sharedFormView.banner_image_url"
+            class="flex-none mb-4"
+          />
+          <div class="rounded-3xl border-1 border-gray-200 p-6 lg:p-12 bg-white">
+            <h1 class="text-2xl font-bold text-gray-900 mb-4" data-testid="nc-survey-form__heading">
+              {{ sharedFormView.heading }}
+            </h1>
 
-        <h2
-          v-if="sharedFormView.subheading && sharedFormView.subheading !== ''"
-          class="prose-lg text-slate-500 dark:text-slate-300 self-center mb-4 leading-6"
-          data-testid="nc-survey-form__sub-heading"
-        >
-          {{ sharedFormView?.subheading }}
-        </h2>
-      </div>
-    </div>
-
-    <div class="h-full w-full flex items-center px-4 md:px-0">
-      <Transition :name="`slide-${transitionName}`" :duration="transitionDuration" mode="out-in">
-        <div
-          ref="el"
-          :key="field?.title"
-          class="color-transition h-full flex flex-col mt-6 gap-4 w-full max-w-[max(33%,600px)] m-auto"
-        >
-          <div v-if="field && !submitted" class="flex flex-col gap-2">
-            <div class="flex nc-form-column-label" data-testid="nc-form-column-label">
-              <LazySmartsheetHeaderVirtualCell
-                v-if="isVirtualCol(field)"
-                :column="{ ...field, title: field.label || field.title }"
-                :required="isRequired(field, field.required)"
-                :hide-menu="true"
-              />
-
-              <LazySmartsheetHeaderCell
-                v-else
-                :class="field.uidt === UITypes.Checkbox ? 'nc-form-column-label__checkbox' : ''"
-                :column="{ meta: {}, ...field, title: field.label || field.title }"
-                :required="isRequired(field, field.required)"
-                :hide-menu="true"
-              />
-            </div>
-
-            <LazySmartsheetDivDataCell v-if="field.title" class="relative">
-              <LazySmartsheetVirtualCell
-                v-if="isVirtualCol(field)"
-                v-model="formState[field.title]"
-                class="mt-0 nc-input h-auto"
-                :row="{ row: {}, oldRow: {}, rowMeta: {} }"
-                :data-testid="`nc-survey-form__input-${field.title.replaceAll(' ', '')}`"
-                :column="field"
-              />
-
-              <LazySmartsheetCell
-                v-else
-                v-model="formState[field.title]"
-                class="nc-input h-auto"
-                :data-testid="`nc-survey-form__input-${field.title.replaceAll(' ', '')}`"
-                :column="field"
-                edit-enabled
-              />
-
-              <div class="flex flex-col gap-2 text-slate-500 dark:text-slate-300 text-[0.75rem] my-2 px-1">
-                <div v-for="error of v$.localState[field.title]?.$errors" :key="error" class="text-red-500">
-                  {{ error.$message }}
-                </div>
-                <div
-                  class="block text-[14px]"
-                  :class="field.uidt === UITypes.Checkbox ? 'text-center' : ''"
-                  data-testid="nc-survey-form__field-description"
-                >
-                  {{ field.description }}
-                </div>
-
-                <div v-if="field.uidt === UITypes.LongText" class="text-sm text-gray-500 flex flex-wrap items-center">
-                  {{ $t('general.shift') }} <MdiAppleKeyboardShift class="mx-1 text-primary" /> + {{ $t('general.enter') }}
-                  <MaterialSymbolsKeyboardReturn class="mx-1 text-primary" /> {{ $t('msg.makeLineBreak') }}
-                </div>
-              </div>
-            </LazySmartsheetDivDataCell>
-          </div>
-
-          <div class="ml-1 mt-4 flex w-full text-lg">
-            <div class="flex-1 flex justify-center">
-              <div v-if="isLast && !submitted && !v$.$invalid" class="text-center my-4">
-                <button
-                  :class="
-                    animationTarget === AnimationTarget.SubmitButton && isAnimating
-                      ? 'transform translate-y-[1px] translate-x-[1px] ring ring-accent ring-opacity-100'
-                      : ''
-                  "
-                  type="submit"
-                  class="uppercase scaling-btn prose-sm"
-                  data-testid="nc-survey-form__btn-submit"
-                  @click="submit"
-                >
-                  {{ $t('general.submit') }}
-                </button>
-              </div>
-
-              <div v-else-if="!submitted" class="flex items-center gap-3 flex-col">
-                <a-tooltip
-                  :title="
-                    v$.localState[field.title]?.$error ? v$.localState[field.title].$errors[0].$message : $t('msg.info.goToNext')
-                  "
-                  :mouse-enter-delay="0.25"
-                  :mouse-leave-delay="0"
-                >
-                  <!-- Ok button for question -->
-                  <NcButton
-                    data-testid="nc-survey-form__btn-next"
-                    :class="[
-                      v$.localState[field.title]?.$error || columnValidationError ? 'after:!bg-gray-100 after:!ring-red-500' : '',
-                      animationTarget === AnimationTarget.OkButton && isAnimating
-                        ? 'transform translate-y-[2px] translate-x-[2px] after:(!ring !ring-accent !ring-opacity-100)'
-                        : '',
-                    ]"
-                    @click="goNext()"
-                  >
-                    <Transition name="fade">
-                      <span v-if="!v$.localState[field.title]?.$error" class="uppercase text-white">{{ $t('general.ok') }}</span>
-                    </Transition>
-
-                    <Transition name="slide-right" mode="out-in">
-                      <component
-                        :is="iconMap.closeCircle"
-                        v-if="v$.localState[field.title]?.$error || columnValidationError"
-                        class="text-red-500 md:text-md"
-                      />
-                      <component :is="iconMap.check" v-else class="text-white md:text-md" />
-                    </Transition>
-                  </NcButton>
-                </a-tooltip>
-
-                <div class="hidden md:flex text-sm text-gray-500 items-center gap-1">
-                  {{ $t('labels.pressEnter') }} <MaterialSymbolsKeyboardReturn class="text-primary" />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <Transition name="slide-left">
             <div v-if="submitted" class="flex flex-col justify-center items-center text-center">
-              <div class="text-lg px-6 py-3 bg-green-300 text-gray-700 rounded" data-testid="nc-survey-form__success-msg">
-                <template v-if="sharedFormView?.success_msg">
-                  {{ sharedFormView?.success_msg }}
+              <a-alert
+                class="nc-survey-form__success-msg !p-4 !rounded-lg text-left w-full !bg-white !border-gray-200 !items-start"
+                type="success"
+                data-testid="nc-survey-form__success-msg"
+                outlined
+                show-icon
+              >
+                <template #message>
+                  <LazyCellRichText
+                    v-if="sharedFormView?.success_msg?.trim()"
+                    :value="sharedFormView?.success_msg"
+                    class="!h-auto -ml-1"
+                    is-form-field
+                    read-only
+                    sync-value-change
+                  />
+                  <span v-else>
+                    {{ $t('msg.info.thankYou') }}
+                  </span>
+                </template>
+                <template v-if="!sharedFormView?.success_msg?.trim()" #description>
+                  {{ $t('msg.info.submittedFormData') }}
                 </template>
 
-                <template v-else>
-                  <div class="flex flex-col gap-1">
-                    <div>{{ $t('msg.info.thankYou') }}</div>
-
-                    <div>{{ $t('msg.info.submittedFormData') }}</div>
+                <template #icon>
+                  <div>
+                    <GeneralIcon icon="circleCheck2" class="text-[#27D665]"></GeneralIcon>
                   </div>
                 </template>
-              </div>
+              </a-alert>
 
-              <div v-if="sharedFormView" class="mt-3">
-                <p v-if="sharedFormView?.show_blank_form" class="text-xs text-slate-500 dark:text-slate-300 text-center my-4">
-                  {{ $t('labels.newFormLoaded') }} {{ secondsRemain }} {{ $t('general.seconds') }}
+              <div
+                v-if="sharedFormView.show_blank_form || sharedFormView.submit_another_form"
+                class="mt-16 w-full flex justify-between items-center flex-wrap gap-3"
+              >
+                <p v-if="sharedFormView?.show_blank_form" class="text-sm text-gray-500 dark:text-slate-300 m-0">
+                  {{ $t('labels.newFormLoaded') }} {{ secondsRemain }} {{ $t('general.seconds').toLowerCase() }}
                 </p>
 
-                <div v-if="sharedFormView?.submit_another_form" class="text-center">
-                  <NcButton type="primary" data-testid="nc-survey-form__btn-submit-another-form" @click="resetForm">
+                <div class="flex-1 self-end flex justify-end">
+                  <NcButton
+                    v-if="sharedFormView?.submit_another_form"
+                    type="secondary"
+                    :size="isMobileMode ? 'medium' : 'small'"
+                    data-testid="nc-survey-form__btn-submit-another-form"
+                    @click="resetForm"
+                  >
                     {{ $t('activity.submitAnotherForm') }}
                   </NcButton>
                 </div>
               </div>
             </div>
+            <template v-else-if="!isStarted">
+              <div v-if="sharedFormView.subheading?.trim()">
+                <LazyCellRichText
+                  :value="sharedFormView.subheading"
+                  class="font-medium text-base text-gray-500 dark:text-slate-300 !h-auto mb-4 -ml-1"
+                  is-form-field
+                  read-only
+                  sync-value-change
+                  data-testid="nc-survey-form__sub-heading"
+                />
+              </div>
+
+              <div class="flex justify-end mt-12">
+                <div class="flex items-center gap-3">
+                  <div class="hidden md:flex text-sm items-center gap-1 text-gray-800">
+                    <span> {{ $t('labels.pressEnter') }} ↵ </span>
+                  </div>
+                  <NcButton
+                    :size="isMobileMode ? 'medium' : 'small'"
+                    data-testid="nc-survey-form__fill-form-btn"
+                    @click="onStart()"
+                  >
+                    Fill Form
+                  </NcButton>
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
+        <template v-if="isStarted && !submitted">
+          <Transition :name="`slide-${transitionName}`" :duration="transitionDuration" mode="out-in">
+            <div
+              ref="el"
+              :key="field?.title"
+              class="flex flex-col gap-4 w-full m-auto rounded-xl border-1 border-gray-200 bg-white p-6 lg:p-12"
+            >
+              <div class="select-none text-gray-500 mb-4 md:mb-2" data-testid="nc-survey-form__footer">
+                {{ index + 1 }} / {{ formColumns?.length }}
+              </div>
+
+              <div v-if="field" class="flex flex-col gap-2">
+                <div class="nc-form-column-label text-sm font-semibold text-gray-800" data-testid="nc-form-column-label">
+                  <span>
+                    {{ field.label || field.title }}
+                  </span>
+                  <span v-if="isRequired(field, field.required)" class="text-red-500 text-base leading-[18px]">&nbsp;*</span>
+                </div>
+                <div
+                  v-if="field?.description"
+                  class="nc-form-column-description text-gray-500 text-sm"
+                  data-testid="nc-survey-form__field-description"
+                >
+                  <LazyCellRichText :value="field?.description" class="!h-auto -ml-1" is-form-field read-only sync-value-change />
+                </div>
+
+                <NcTooltip :disabled="!field?.read_only">
+                  <template #title> {{ $t('activity.preFilledFields.lockedFieldTooltip') }} </template>
+                  <SmartsheetDivDataCell v-if="field.title" class="relative nc-form-data-cell" @click.stop="handleFocus">
+                    <LazySmartsheetVirtualCell
+                      v-if="isVirtualCol(field)"
+                      v-model="formState[field.title]"
+                      class="mt-0 nc-input h-auto"
+                      :class="{
+                        readonly: field?.read_only,
+                      }"
+                      :row="{ row: {}, oldRow: {}, rowMeta: {} }"
+                      :data-testid="`nc-survey-form__input-${field.title.replaceAll(' ', '')}`"
+                      :column="field"
+                      :read-only="field?.read_only"
+                      @update:model-value="validateField(field.title, 'virtual')"
+                    />
+
+                    <LazySmartsheetCell
+                      v-else
+                      v-model="formState[field.title]"
+                      class="nc-input h-auto"
+                      :class="{ 'layout-list': parseProp(field?.meta)?.isList, 'readonly': field?.read_only }"
+                      :data-testid="`nc-survey-form__input-${field.title.replaceAll(' ', '')}`"
+                      :column="field"
+                      :edit-enabled="!field?.read_only"
+                      :read-only="field?.read_only"
+                      @update:model-value="validateField(field.title, 'cell')"
+                    />
+
+                    <div class="flex flex-col gap-2 text-slate-500 dark:text-slate-300 text-xs my-2 px-1">
+                      <template v-if="isVirtualCol(field)">
+                        <div v-for="error of v$.virtual[field.title]?.$errors" :key="`${error}virtual`" class="text-red-500">
+                          {{ error.$message }}
+                        </div>
+                      </template>
+                      <template v-else>
+                        <div v-for="error of v$.localState[field.title]?.$errors" :key="error" class="text-red-500">
+                          {{ error.$message }}
+                        </div>
+                      </template>
+
+                      <div
+                        v-if="field.uidt === UITypes.LongText"
+                        class="hidden text-sm text-gray-500 md:flex flex-wrap items-center"
+                      >
+                        {{ $t('general.shift') }} <MdiAppleKeyboardShift class="mx-1 text-primary" /> + {{ $t('general.enter') }}
+                        <MaterialSymbolsKeyboardReturn class="mx-1 text-primary" /> {{ $t('msg.info.makeLineBreak') }}
+                      </div>
+                    </div>
+                  </SmartsheetDivDataCell>
+                </NcTooltip>
+              </div>
+
+              <div class="ml-1 mt-4 flex w-full text-lg">
+                <div class="flex-1 flex justify-end">
+                  <div v-if="isLast">
+                    <NcButton
+                      :size="isMobileMode ? 'medium' : 'small'"
+                      :class="
+                        animationTarget === AnimationTarget.SubmitButton && isAnimating
+                          ? 'transform translate-y-[1px] translate-x-[1px] ring ring-accent ring-opacity-100'
+                          : ''
+                      "
+                      :disabled="fieldHasError"
+                      data-testid="nc-survey-form__btn-submit-confirm"
+                      @click="showSubmitConfirmModal"
+                    >
+                      {{ $t('general.submit') }} form
+                    </NcButton>
+                  </div>
+
+                  <div v-else class="flex items-center gap-3">
+                    <div
+                      class="hidden md:flex text-sm items-center gap-1"
+                      :class="fieldHasError ? 'text-gray-200' : 'text-gray-800'"
+                    >
+                      <span> {{ $t('labels.pressEnter') }} ↵ </span>
+                    </div>
+                    <NcButton
+                      :size="isMobileMode ? 'medium' : 'small'"
+                      data-testid="nc-survey-form__btn-next"
+                      class="nc-survey-form__btn-next"
+                      :class="[
+                        animationTarget === AnimationTarget.OkButton && isAnimating
+                          ? 'transform translate-y-[2px] translate-x-[2px] after:(!ring !ring-accent !ring-opacity-100)'
+                          : '',
+                      ]"
+                      :disabled="fieldHasError"
+                      @click="goNext()"
+                    >
+                      {{ $t('labels.next') }}
+                    </NcButton>
+                  </div>
+                </div>
+              </div>
+            </div>
           </Transition>
-        </div>
-      </Transition>
-    </div>
-
-    <template v-if="!submitted">
-      <div class="mb-24 md:my-4 select-none text-center text-gray-500 dark:text-slate-200" data-testid="nc-survey-form__footer">
-        {{ index + 1 }} / {{ formColumns?.length }}
+        </template>
       </div>
-    </template>
-
-    <div class="relative flex w-full items-end">
-      <Transition name="fade">
-        <div
-          v-if="!submitted"
-          class="color-transition shadow-sm absolute bottom-18 right-1/2 transform translate-x-[50%] md:bottom-4 md:(right-12 transform-none) flex items-center bg-white border dark:bg-slate-500 rounded divide-x-1"
-        >
-          <a-tooltip :title="isFirst ? '' : $t('msg.info.goToPrevious')" :mouse-enter-delay="0.25" :mouse-leave-delay="0">
-            <button
-              :class="
-                animationTarget === AnimationTarget.ArrowLeft && isAnimating
-                  ? 'transform translate-y-[1px] translate-x-[1px] text-primary'
-                  : ''
-              "
-              class="p-0.5 flex items-center group color-transition"
+      <div class="md:(absolute bottom-0 left-0 right-0 px-4 pb-4) lg:px-10 lg:pb-10">
+        <div class="flex justify-end items-center gap-4">
+          <div class="flex justify-center">
+            <GeneralFormBranding
+              class="inline-flex mx-auto"
+              :style="{
+                color: tinycolor.isReadable(parseProp(sharedFormView?.meta)?.background_color || '#F9F9FA', '#D5D5D9', {
+                  level: 'AA',
+                  size: 'large',
+                })
+                  ? '#fff'
+                  : tinycolor
+                      .mostReadable(parseProp(sharedFormView?.meta)?.background_color || '#F9F9FA', ['#374151', '#D5D5D9'])
+                      .toHex8String(),
+              }"
+            />
+          </div>
+          <div v-if="isStarted && !submitted" class="flex items-center gap-3">
+            <NcButton
+              type="secondary"
+              :size="isMobileMode ? 'medium' : 'small'"
               data-testid="nc-survey-form__icon-prev"
+              :disabled="isFirst"
               @click="goPrevious()"
             >
-              <component
-                :is="iconMap.chevronLeft"
-                :class="isFirst ? 'text-gray-300' : 'group-hover:text-accent'"
-                class="text-2xl md:text-md"
-              />
-            </button>
-          </a-tooltip>
+              <GeneralIcon icon="ncArrowLeft"
+            /></NcButton>
 
-          <a-tooltip
-            :title="v$.localState[field.title]?.$error ? '' : $t('msg.info.goToNext')"
-            :mouse-enter-delay="0.25"
-            :mouse-leave-delay="0"
-          >
-            <button
-              :class="
-                animationTarget === AnimationTarget.ArrowRight && isAnimating
-                  ? 'transform translate-y-[1px] translate-x-[-1px] text-primary'
-                  : ''
-              "
-              class="p-0.5 flex items-center group color-transition"
+            <NcButton
+              :size="isMobileMode ? 'medium' : 'small'"
+              type="secondary"
               data-testid="nc-survey-form__icon-next"
+              :disabled="isLast || fieldHasError"
               @click="goNext()"
             >
-              <component
-                :is="iconMap.chevronRight"
-                :class="[isLast || v$.localState[field.title]?.$error ? 'text-gray-300' : 'group-hover:text-accent']"
-                class="text-2xl md:text-md"
-              />
-            </button>
-          </a-tooltip>
+              <GeneralIcon icon="ncArrowRight" />
+            </NcButton>
+          </div>
         </div>
-      </Transition>
-
-      <GeneralPoweredBy />
+      </div>
     </div>
+
+    <NcModal v-model:visible="dialogShow" size="small" class="nc-survery-form__confirmation_modal">
+      <div>
+        <div class="text-lg font-bold">{{ $t('general.submit') }} {{ $t('objects.viewType.form') }}</div>
+        <div class="mt-1 text-sm">{{ $t('title.surveyFormSubmitConfirmMsg') }}</div>
+        <div class="flex justify-end mt-7 gap-x-2">
+          <NcButton type="secondary" :size="isMobileMode ? 'medium' : 'small'" @click="dialogShow = false">{{
+            $t('general.back')
+          }}</NcButton>
+          <NcButton
+            type="primary"
+            :size="isMobileMode ? 'medium' : 'small'"
+            data-testid="nc-survey-form__btn-submit"
+            class="nc-survey-form-btn-submit"
+            @click="submit"
+          >
+            {{ $t('general.submit') }}
+          </NcButton>
+        </div>
+      </div>
+    </NcModal>
   </div>
 </template>
 
 <style lang="scss">
-:global(html, body) {
+:global(html),
+:global(body) {
   @apply overscroll-x-none;
 }
 
 .survey {
   .nc-form-column-label {
-    > * {
-      @apply !prose-lg;
-    }
-
     .nc-icon {
       @apply mr-2;
     }
@@ -493,17 +572,17 @@ onMounted(() => {
     @apply flex items-center justify-center gap-2 text-left;
   }
 
-  .nc-input {
-    @apply appearance-none w-full rounded px-2 py-2 my-2 border-solid border-1 border-primary border-opacity-50;
+  .nc-form-data-cell.nc-data-cell {
+    @apply !border-none rounded-none;
 
-    &.nc-cell-checkbox {
-      > * {
-        @apply justify-center flex items-center;
-      }
+    &:focus-within {
+      @apply !border-none;
     }
+  }
 
-    input {
-      @apply !py-1 !px-1;
+  .nc-survey-form__success-msg {
+    .ant-alert-icon {
+      @apply flex items-start;
     }
   }
 }

@@ -25,6 +25,13 @@ import * as nc_035_add_username_to_users from '~/meta/migrations/v2/nc_035_add_u
 import * as nc_036_base_deleted from '~/meta/migrations/v2/nc_036_base_deleted';
 import * as nc_037_rename_project_and_base from '~/meta/migrations/v2/nc_037_rename_project_and_base';
 import * as nc_038_formula_parsed_tree_column from '~/meta/migrations/v2/nc_038_formula_parsed_tree_column';
+import * as nc_039_sqlite_alter_column_types from '~/meta/migrations/v2/nc_039_sqlite_alter_column_types';
+import * as nc_040_form_view_alter_column_types from '~/meta/migrations/v2/nc_040_form_view_alter_column_types';
+import * as nc_041_calendar_view from '~/meta/migrations/v2/nc_041_calendar_view';
+import * as nc_042_user_block from '~/meta/migrations/v2/nc_042_user_block';
+import * as nc_043_user_refresh_token from '~/meta/migrations/v2/nc_043_user_refresh_token';
+import * as nc_044_view_column_index from '~/meta/migrations/v2/nc_044_view_column_index';
+import * as nc_045_extensions from '~/meta/migrations/v2/nc_045_extensions';
 
 // Create a custom migration source class
 export default class XcMigrationSourcev2 {
@@ -61,6 +68,13 @@ export default class XcMigrationSourcev2 {
       'nc_036_base_deleted',
       'nc_037_rename_project_and_base',
       'nc_038_formula_parsed_tree_column',
+      'nc_039_sqlite_alter_column_types',
+      'nc_040_form_view_alter_column_types',
+      'nc_041_calendar_view',
+      'nc_042_user_block',
+      'nc_043_user_refresh_token',
+      'nc_044_view_column_index',
+      'nc_045_extensions',
     ]);
   }
 
@@ -124,6 +138,20 @@ export default class XcMigrationSourcev2 {
         return nc_037_rename_project_and_base;
       case 'nc_038_formula_parsed_tree_column':
         return nc_038_formula_parsed_tree_column;
+      case 'nc_039_sqlite_alter_column_types':
+        return nc_039_sqlite_alter_column_types;
+      case 'nc_040_form_view_alter_column_types':
+        return nc_040_form_view_alter_column_types;
+      case 'nc_041_calendar_view':
+        return nc_041_calendar_view;
+      case 'nc_042_user_block':
+        return nc_042_user_block;
+      case 'nc_043_user_refresh_token':
+        return nc_043_user_refresh_token;
+      case 'nc_044_view_column_index':
+        return nc_044_view_column_index;
+      case 'nc_045_extensions':
+        return nc_045_extensions;
     }
   }
 }

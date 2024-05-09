@@ -66,40 +66,27 @@ export default class GalleryViewColumn {
       insertObj.source_id = viewRef.source_id;
     }
 
-    const { id, fk_column_id } = await ncMeta.metaInsert2(
+    const { id } = await ncMeta.metaInsert2(
       null,
       null,
       MetaTable.GALLERY_VIEW_COLUMNS,
       insertObj,
     );
 
-    await NocoCache.set(
-      `${CacheScope.GALLERY_VIEW_COLUMN}:${fk_column_id}`,
-      id,
-    );
+    // on new view column, delete any optimised single query cache
+    {
+      const view = await View.get(column.fk_view_id, ncMeta);
+      await View.clearSingleQueryCache(view.fk_model_id, [view], ncMeta);
+    }
 
-    // if cache is not present skip pushing it into the list to avoid unexpected behaviour
-    const { list } = await NocoCache.getList(CacheScope.GALLERY_VIEW_COLUMN, [
-      column.fk_view_id,
-    ]);
-
-    if (list?.length)
+    return this.get(id, ncMeta).then(async (viewColumn) => {
       await NocoCache.appendToList(
         CacheScope.GALLERY_VIEW_COLUMN,
         [column.fk_view_id],
         `${CacheScope.GALLERY_VIEW_COLUMN}:${id}`,
       );
-
-    // on new view column, delete any optimised single query cache
-    {
-      const view = await View.get(column.fk_view_id, ncMeta);
-      await NocoCache.delAll(
-        CacheScope.SINGLE_QUERY,
-        `${view.fk_model_id}:${view.id}:*`,
-      );
-    }
-
-    return this.get(id, ncMeta);
+      return viewColumn;
+    });
   }
 
   public static async list(
@@ -133,5 +120,35 @@ export default class GalleryViewColumn {
         (b.order != null ? b.order : Infinity),
     );
     return views?.map((v) => new GalleryViewColumn(v));
+  }
+
+  static async update(
+    columnId: string,
+    body: Partial<GalleryViewColumn>,
+    ncMeta = Noco.ncMeta,
+  ) {
+    const updateObj = extractProps(body, ['order', 'show']);
+
+    // set meta
+    const res = await ncMeta.metaUpdate(
+      null,
+      null,
+      MetaTable.GALLERY_VIEW_COLUMNS,
+      updateObj,
+      columnId,
+    );
+
+    // get existing cache
+    const key = `${CacheScope.GALLERY_VIEW_COLUMN}:${columnId}`;
+    await NocoCache.update(key, updateObj);
+
+    // on view column update, delete any optimised single query cache
+    {
+      const viewCol = await this.get(columnId, ncMeta);
+      const view = await View.get(viewCol.fk_view_id, ncMeta);
+      await View.clearSingleQueryCache(view.fk_model_id, [view]);
+    }
+
+    return res;
   }
 }

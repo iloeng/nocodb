@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { VNodeRef } from '@vue/runtime-core'
-import { EditColumnInj, EditModeInj, IsExpandedFormOpenInj, IsFormInj, inject, useVModel } from '#imports'
 
 interface Props {
   modelValue?: number | string | null
@@ -14,24 +13,15 @@ const { showNull } = useGlobal()
 
 const column = inject(ColumnInj)!
 
-const editEnabled = inject(EditModeInj)
+const editEnabled = inject(EditModeInj, ref(false))
 
 const isEditColumn = inject(EditColumnInj, ref(false))
+
+const readOnly = inject(ReadonlyInj, ref(false))
 
 const _vModel = useVModel(props, 'modelValue', emits)
 
 const wrapperRef = ref<HTMLElement>()
-
-const vModel = computed({
-  get: () => _vModel.value,
-  set: (value) => {
-    if (value === '') {
-      _vModel.value = null
-    } else {
-      _vModel.value = value
-    }
-  },
-})
 
 const isExpandedFormOpen = inject(IsExpandedFormOpenInj, ref(false))!
 
@@ -44,12 +34,31 @@ const cellFocused = ref(false)
 
 const expandedEditEnabled = ref(false)
 
+const vModel = computed({
+  get: () => {
+    return isForm.value && !isEditColumn.value && _vModel.value && !cellFocused.value && !isNaN(Number(_vModel.value))
+      ? `${_vModel.value}%`
+      : _vModel.value
+  },
+  set: (value) => {
+    if (value === '') {
+      _vModel.value = null
+    } else if (isForm.value && !isEditColumn.value) {
+      _vModel.value = isNaN(Number(value)) ? value : Number(value)
+    } else {
+      _vModel.value = value
+    }
+  },
+})
+
 const percentMeta = computed(() => {
   return {
     is_progress: false,
     ...parseProp(column.value?.meta),
   }
 })
+
+const inputType = computed(() => (isForm.value && !isEditColumn.value ? 'text' : 'number'))
 
 const onBlur = () => {
   if (editEnabled) {
@@ -104,7 +113,11 @@ const onTabPress = (e: KeyboardEvent) => {
       )
 
       for (let i = focusesNcCellIndex - 1; i >= 0; i--) {
-        const lastFormItem = nodes[i].querySelector('[tabindex="0"]') as HTMLElement
+        const node = nodes[i]
+        const lastFormItem = (node.querySelector('[tabindex="0"]') ??
+          node.querySelector('input') ??
+          node.querySelector('textarea') ??
+          node.querySelector('button')) as HTMLElement
         if (lastFormItem) {
           lastFormItem.focus()
           break
@@ -118,19 +131,19 @@ const onTabPress = (e: KeyboardEvent) => {
 <template>
   <div
     ref="wrapperRef"
-    tabindex="0"
+    :tabindex="readOnly ? -1 : 0"
     class="nc-filter-value-select w-full focus:outline-transparent"
+    :class="readOnly ? 'cursor-not-allowed pointer-events-none' : ''"
     @mouseover="onMouseover"
     @mouseleave="onMouseleave"
     @focus="onWrapperFocus"
   >
     <input
-      v-if="editEnabled"
+      v-if="!readOnly && editEnabled && (isExpandedFormOpen ? expandedEditEnabled || !percentMeta.is_progress : true)"
       :ref="focus"
       v-model="vModel"
-      class="w-full !text-sm !border-none !outline-none focus:ring-0 text-base py-1"
-      :class="isExpandedFormOpen ? 'px-2' : 'px-0'"
-      type="number"
+      class="nc-cell-field w-full !border-none !outline-none focus:ring-0 py-1"
+      :type="inputType"
       :placeholder="isEditColumn ? $t('labels.optional') : ''"
       @blur="onBlur"
       @focus="onFocus"
@@ -143,7 +156,7 @@ const onTabPress = (e: KeyboardEvent) => {
       @selectstart.capture.stop
       @mousedown.stop
     />
-    <span v-else-if="vModel === null && showNull" class="nc-null capitalize">{{ $t('general.null') }}</span>
+    <span v-else-if="vModel === null && showNull" class="nc-cell-field nc-null uppercase">{{ $t('general.null') }}</span>
     <div v-else-if="percentMeta.is_progress === true && vModel !== null && vModel !== undefined" class="px-2">
       <a-progress
         :percent="Number(parseFloat(vModel.toString()).toFixed(2))"
@@ -155,7 +168,7 @@ const onTabPress = (e: KeyboardEvent) => {
       />
     </div>
     <!-- nbsp to keep height even if vModel is zero length -->
-    <span v-else>{{ vModel }}&nbsp;</span>
+    <span v-else class="nc-cell-field">{{ vModel }} {{ !vModel ? '&nbsp;' : '' }}</span>
   </div>
 </template>
 

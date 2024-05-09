@@ -70,6 +70,8 @@ const permissionScopes = {
     'galleryViewGet',
     'kanbanViewGet',
     'gridViewUpdate',
+    'formViewUpdate',
+    'calendarViewGet',
     'groupedDataList',
     'mmList',
     'hmList',
@@ -90,6 +92,7 @@ const permissionScopes = {
     'swaggerJson',
     'commentList',
     'commentsCount',
+    'commentUpdate',
     'hideAllColumns',
     'showAllColumns',
     'auditRowUpdate',
@@ -108,6 +111,7 @@ const permissionScopes = {
     'mmExcludedList',
     'hmExcludedList',
     'btExcludedList',
+    'ooExcludedList',
     'gridColumnUpdate',
     'bulkDataInsert',
     'bulkDataUpdate',
@@ -120,12 +124,20 @@ const permissionScopes = {
     'nestedDataList',
     'nestedDataLink',
     'nestedDataUnlink',
+    'nestedListCopyPasteOrDeleteAll',
     'baseUserList',
 
     // Base API Tokens
     'baseApiTokenList',
     'baseApiTokenCreate',
     'baseApiTokenDelete',
+
+    // Extensions
+    'extensionList',
+    'extensionRead',
+    'extensionCreate',
+    'extensionUpdate',
+    'extensionDelete',
   ],
 };
 
@@ -164,6 +176,7 @@ const rolePermissions:
       galleryViewGet: true,
       kanbanViewGet: true,
       groupedDataList: true,
+      calendarViewGet: true,
 
       mmList: true,
       hmList: true,
@@ -186,6 +199,9 @@ const rolePermissions:
 
       nestedDataList: true,
       baseUserList: true,
+
+      extensionList: true,
+      extensionRead: true,
     },
   },
   [ProjectRoles.COMMENTER]: {
@@ -193,6 +209,7 @@ const rolePermissions:
       commentList: true,
       commentsCount: true,
       commentRow: true,
+      commentUpdate: true,
     },
   },
   [ProjectRoles.EDITOR]: {
@@ -205,6 +222,7 @@ const rolePermissions:
       dataInsert: true,
       viewColumnUpdate: true,
       gridViewUpdate: true,
+      formViewUpdate: true,
       sortCreate: true,
       sortUpdate: true,
       sortDelete: true,
@@ -216,6 +234,7 @@ const rolePermissions:
       mmExcludedList: true,
       hmExcludedList: true,
       btExcludedList: true,
+      ooExcludedList: true,
       gridColumnUpdate: true,
       bulkDataInsert: true,
       bulkDataUpdate: true,
@@ -227,6 +246,7 @@ const rolePermissions:
 
       nestedDataLink: true,
       nestedDataUnlink: true,
+      nestedListCopyPasteOrDeleteAll: true,
       // TODO add ACL with base scope
       // upload: true,
       // uploadViaURL: true,
@@ -255,6 +275,7 @@ const rolePermissions:
       passwordChange: true,
       baseList: true,
       testConnection: true,
+      isPluginActive: true,
     },
   },
   [OrgUserRoles.CREATOR]: {
@@ -267,7 +288,6 @@ const rolePermissions:
       userInviteResend: true,
       upload: true,
       uploadViaURL: true,
-      isPluginActive: true,
       baseCreate: true,
       duplicateSharedBase: true,
     },

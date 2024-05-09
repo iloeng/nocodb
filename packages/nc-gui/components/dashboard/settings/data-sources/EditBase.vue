@@ -2,28 +2,16 @@
 import type { SourceType } from 'nocodb-sdk'
 import { Form, message } from 'ant-design-vue'
 import type { SelectHandler } from 'ant-design-vue/es/vc-select/Select'
-import type { DefaultConnection, ProjectCreateForm, SQLiteConnection } from '#imports'
 import {
-  CertTypes,
+  type CertTypes,
   ClientType,
-  ProjectIdInj,
+  type DatabricksConnection,
+  type DefaultConnection,
+  type ProjectCreateForm,
+  type SQLiteConnection,
   SSLUsage,
-  baseTitleValidator,
-  clientTypes,
-  computed,
-  extractSdkResponseErrorMsg,
-  fieldRequiredValidator,
-  getDefaultConnectionConfig,
-  getTestDatabaseName,
-  iconMap,
-  onMounted,
-  readFile,
-  ref,
-  storeToRefs,
-  useApi,
-  useI18n,
-  useNuxtApp,
-  watch,
+  type SnowflakeConnection,
+  clientTypes as _clientTypes,
 } from '#imports'
 
 const props = defineProps<{
@@ -56,6 +44,12 @@ const { $e } = useNuxtApp()
 const { t } = useI18n()
 
 const editingSource = ref(false)
+
+const clientTypes = computed(() => {
+  return _clientTypes.filter((type) => {
+    return ![ClientType.SNOWFLAKE, ClientType.DATABRICKS].includes(type.value)
+  })
+})
 
 const formState = ref<ProjectCreateForm>({
   title: '',
@@ -222,6 +216,11 @@ const editBase = async () => {
 
     const config = { ...formState.value.dataSource, connection }
 
+    // todo: refactor and remove this duplicate path in config
+    if (config.client === ClientType.SQLITE && config.connection?.connection?.filename) {
+      config.connection.filename = config.connection.connection.filename
+    }
+
     await api.source.update(base.value?.id, props.sourceId, {
       alias: formState.value.title,
       type: formState.value.dataSource.client,
@@ -381,6 +380,90 @@ onMounted(async () => {
         >
           <a-input v-model:value="(formState.dataSource.connection as SQLiteConnection).connection.filename" />
         </a-form-item>
+
+        <template v-else-if="formState.dataSource.client === ClientType.SNOWFLAKE">
+          <!-- Account -->
+          <a-form-item :label="$t('labels.account')" v-bind="validateInfos['dataSource.connection.account']">
+            <a-input
+              v-model:value="(formState.dataSource.connection as SnowflakeConnection).account"
+              class="nc-extdb-host-address"
+            />
+          </a-form-item>
+
+          <!-- Username -->
+          <a-form-item :label="$t('labels.username')" v-bind="validateInfos['dataSource.connection.username']">
+            <a-input
+              v-model:value="(formState.dataSource.connection as SnowflakeConnection).username"
+              class="nc-extdb-host-user"
+            />
+          </a-form-item>
+
+          <!-- Password -->
+          <a-form-item :label="$t('labels.password')" v-bind="validateInfos['dataSource.connection.password']">
+            <a-input-password
+              v-model:value="(formState.dataSource.connection as SnowflakeConnection).password"
+              class="nc-extdb-host-password"
+            />
+          </a-form-item>
+
+          <!-- Warehouse -->
+          <a-form-item label="Warehouse" v-bind="validateInfos['dataSource.connection.warehouse']">
+            <a-input
+              v-model:value="(formState.dataSource.connection as SnowflakeConnection).warehouse"
+              class="nc-extdb-host-database"
+            />
+          </a-form-item>
+
+          <!-- Database -->
+          <a-form-item :label="$t('labels.database')" v-bind="validateInfos['dataSource.connection.database']">
+            <a-input
+              v-model:value="(formState.dataSource.connection as SnowflakeConnection).database"
+              class="nc-extdb-host-database"
+            />
+          </a-form-item>
+
+          <!-- Schema -->
+          <a-form-item label="Schema" v-bind="validateInfos['dataSource.connection.schema']">
+            <a-input
+              v-model:value="(formState.dataSource.connection as SnowflakeConnection).schema"
+              class="nc-extdb-host-database"
+            />
+          </a-form-item>
+        </template>
+
+        <template v-else-if="formState.dataSource.client === ClientType.DATABRICKS">
+          <a-form-item label="Token" v-bind="validateInfos['dataSource.connection.token']">
+            <a-input
+              v-model:value="(formState.dataSource.connection as DatabricksConnection).token"
+              class="nc-extdb-host-token"
+            />
+          </a-form-item>
+
+          <a-form-item label="Host" v-bind="validateInfos['dataSource.connection.host']">
+            <a-input
+              v-model:value="(formState.dataSource.connection as DatabricksConnection).host"
+              class="nc-extdb-host-address"
+            />
+          </a-form-item>
+
+          <a-form-item label="Path" v-bind="validateInfos['dataSource.connection.path']">
+            <a-input v-model:value="(formState.dataSource.connection as DatabricksConnection).path" class="nc-extdb-host-path" />
+          </a-form-item>
+
+          <a-form-item label="Database" v-bind="validateInfos['dataSource.connection.database']">
+            <a-input
+              v-model:value="(formState.dataSource.connection as DatabricksConnection).database"
+              class="nc-extdb-host-database"
+            />
+          </a-form-item>
+
+          <a-form-item label="Schema" v-bind="validateInfos['dataSource.connection.schema']">
+            <a-input
+              v-model:value="(formState.dataSource.connection as DatabricksConnection).schema"
+              class="nc-extdb-host-schema"
+            />
+          </a-form-item>
+        </template>
 
         <template v-else>
           <!-- Host Address -->

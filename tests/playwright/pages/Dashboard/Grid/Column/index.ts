@@ -28,10 +28,6 @@ export class ColumnPageObject extends BasePage {
     return this.grid.get().locator(`.nc-grid-header > th`).nth(index);
   }
 
-  private getColumnHeader(title: string) {
-    return this.grid.get().locator(`th[data-title="${title}"]`).first();
-  }
-
   async clickColumnHeader({ title }: { title: string }) {
     await this.getColumnHeader(title).click();
   }
@@ -177,7 +173,7 @@ export class ColumnPageObject extends BasePage {
       case 'Links':
         await this.get()
           .locator('.nc-ltar-relation-type >> .ant-radio')
-          .nth(relationType === 'Has Many' ? 0 : 1)
+          .nth(relationType === 'Has Many' ? 1 : 2)
           .click();
         await this.get().locator('.ant-select-single').nth(1).click();
         await this.rootPage.locator(`.nc-ltar-child-table >> input[type="search"]`).fill(childTable);
@@ -220,8 +216,12 @@ export class ColumnPageObject extends BasePage {
     await this.get().locator('.nc-column-name-input').fill(title);
   }
 
-  async selectType({ type }: { type: string }) {
-    await this.get().locator('.ant-select-selector > .ant-select-selection-item').click();
+  async selectType({ type, first }: { type: string; first?: boolean }) {
+    if (first) {
+      await this.get().locator('.ant-select-selector > .ant-select-selection-item').first().click();
+    } else {
+      await this.get().locator('.ant-select-selector > .ant-select-selection-item').click();
+    }
 
     await this.get().locator('.ant-select-selection-search-input[aria-expanded="true"]').waitFor();
     await this.get().locator('.ant-select-selection-search-input[aria-expanded="true"]').fill(type);
@@ -275,7 +275,6 @@ export class ColumnPageObject extends BasePage {
     await this.rootPage.locator('.ant-modal.active').waitFor({ state: 'hidden' });
   }
 
-  // opening edit modal in table header  double click
   // or in the dropdown edit click
   async openEdit({
     title,
@@ -284,6 +283,7 @@ export class ColumnPageObject extends BasePage {
     format,
     dateFormat = '',
     timeFormat = '',
+    selectType = false,
   }: {
     title: string;
     type?: string;
@@ -291,13 +291,19 @@ export class ColumnPageObject extends BasePage {
     format?: string;
     dateFormat?: string;
     timeFormat?: string;
+    selectType?: boolean;
   }) {
     // when clicked on the dropdown cell header
     await this.getColumnHeader(title).locator('.nc-ui-dt-dropdown').scrollIntoViewIfNeeded();
     await this.getColumnHeader(title).locator('.nc-ui-dt-dropdown').click();
-    await this.rootPage.locator('li[role="menuitem"]:has-text("Edit")').last().click();
+    await expect(await this.rootPage.locator('li[role="menuitem"]:has-text("Edit"):visible').last()).toBeVisible();
+    await this.rootPage.locator('li[role="menuitem"]:has-text("Edit"):visible').last().click();
 
     await this.get().waitFor({ state: 'visible' });
+
+    if (selectType) {
+      await this.selectType({ type, first: true });
+    }
 
     switch (type) {
       case 'Formula':
@@ -315,19 +321,33 @@ export class ColumnPageObject extends BasePage {
         // Date Format
         await this.get().locator('.nc-date-select').click();
         await this.rootPage.locator('.ant-select-item').locator(`text="${dateFormat}"`).click();
+
+        // allow UI to update
+        await this.rootPage.waitForTimeout(500);
+
         // Time Format
         await this.get().locator('.nc-time-select').click();
         await this.rootPage.locator('.ant-select-item').locator(`text="${timeFormat}"`).click();
+
+        // allow UI to update
+        await this.rootPage.waitForTimeout(500);
+
         break;
       case 'Date':
         await this.get().locator('.nc-date-select').click();
-        await this.rootPage.locator('.nc-date-select').pressSequentially(dateFormat);
+        await this.rootPage.locator('.nc-date-select').pressSequentially(dateFormat, { delay: 100 });
         await this.rootPage.locator('.ant-select-item').locator(`text="${dateFormat}"`).click();
+
+        // allow UI to update
+        await this.rootPage.waitForTimeout(500);
+
         break;
       default:
         break;
     }
   }
+
+  // opening edit modal in table header  double click
 
   async editMenuShowMore() {
     await this.rootPage.locator('.nc-more-options').click();
@@ -455,6 +475,7 @@ export class ColumnPageObject extends BasePage {
 
     // close sort menu
     await this.grid.toolbar.clickSort();
+    await this.rootPage.waitForTimeout(100);
   }
 
   async resize(param: { src: string; dst: string }) {
@@ -478,5 +499,9 @@ export class ColumnPageObject extends BasePage {
     const { title } = param;
     const cell = this.rootPage.locator(`th[data-title="${title}"]`);
     return await cell.evaluate(el => el.getBoundingClientRect().width);
+  }
+
+  private getColumnHeader(title: string) {
+    return this.grid.get().locator(`th[data-title="${title}"]`).first();
   }
 }

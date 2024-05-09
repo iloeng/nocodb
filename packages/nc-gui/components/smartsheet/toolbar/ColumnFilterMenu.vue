@@ -1,18 +1,5 @@
 <script setup lang="ts">
-import {
-  ActiveViewInj,
-  AllFiltersInj,
-  IsLockedInj,
-  computed,
-  iconMap,
-  inject,
-  ref,
-  useGlobal,
-  useMenuCloseOnEsc,
-  useSmartsheetStoreOrThrow,
-  useViewFilters,
-  watch,
-} from '#imports'
+import type { ColumnType } from 'nocodb-sdk'
 
 const isLocked = inject(IsLockedInj, ref(false))
 
@@ -22,7 +9,7 @@ const { isMobileMode } = useGlobal()
 
 const filterComp = ref<typeof ColumnFilter>()
 
-const { nestedFilters } = useSmartsheetStoreOrThrow()
+const { nestedFilters, eventBus } = useSmartsheetStoreOrThrow()
 
 // todo: avoid duplicate api call by keeping a filter store
 const { nonDeletedFilters, loadFilters } = useViewFilters(
@@ -40,7 +27,7 @@ watch(
   () => activeView?.value?.id,
   async (viewId) => {
     if (viewId) {
-      await loadFilters()
+      await loadFilters(undefined, false, true)
       filtersLength.value = nonDeletedFilters.value.length || 0
     }
   },
@@ -54,6 +41,17 @@ const allFilters = ref({})
 provide(AllFiltersInj, allFilters)
 
 useMenuCloseOnEsc(open)
+
+const draftFilter = ref({})
+
+eventBus.on(async (event, column: ColumnType) => {
+  if (!column) return
+
+  if (event === SmartsheetStoreEvents.FILTER_ADD) {
+    draftFilter.value = { fk_column_id: column.id }
+    open.value = true
+  }
+})
 </script>
 
 <template>
@@ -78,6 +76,7 @@ useMenuCloseOnEsc(open)
     <template #overlay>
       <SmartsheetToolbarColumnFilter
         ref="filterComp"
+        v-model:draft-filter="draftFilter"
         class="nc-table-toolbar-menu"
         :auto-save="true"
         data-testid="nc-filter-menu"

@@ -20,8 +20,6 @@ const log = new Debug('MysqlClient');
 const evt = new Emit();
 
 class MysqlClient extends KnexClient {
-  protected queries: any;
-  protected _version: any;
   protected types: any;
 
   constructor(connectionConfig) {
@@ -316,8 +314,6 @@ class MysqlClient extends KnexClient {
 
       log.debug('Create database if not exists', data);
 
-      // create new knex client
-      this.sqlClient = knex(this.connectionConfig);
       await tempSqlClient.destroy();
     } catch (e) {
       log.ppe(e, func);
@@ -2498,6 +2494,7 @@ class MysqlClient extends KnexClient {
     query += n.un ? ' UNSIGNED' : '';
     query += n.rqd ? ' NOT NULL' : ' NULL';
     query += n.ai ? ' auto_increment' : '';
+    query += n.unique ? ` UNIQUE` : '';
     const defaultValue = this.sanitiseDefaultValue(n.cdf);
     query += defaultValue
       ? `

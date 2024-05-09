@@ -1,14 +1,16 @@
-import { RelationTypes, UITypes, isLinksOrLTAR, isSystemColumn, isVirtualCol } from 'nocodb-sdk'
+import { RelationTypes, UITypes, isSystemColumn, isVirtualCol } from 'nocodb-sdk'
 import type { ColumnType, LinkToAnotherRecordType, TableType } from 'nocodb-sdk'
-import type { Row } from 'lib'
 import { isColumnRequiredAndNull } from './columnUtils'
+import type { Row } from '~/lib/types'
 
 export const extractPkFromRow = (row: Record<string, any>, columns: ColumnType[]) => {
   if (!row || !columns) return null
-  return columns
-    .filter((c) => c.pk)
-    .map((c) => row?.[c.title as string])
-    .join('___')
+
+  const pkColumns = columns.filter((c) => c.pk)
+
+  if (pkColumns.every((c) => row?.[c.title as string] === null || row?.[c.title as string] === undefined)) return null
+
+  return pkColumns.map((c) => row?.[c.title as string]).join('___')
 }
 
 export const rowPkData = (row: Record<string, any>, columns: ColumnType[]) => {
@@ -20,6 +22,14 @@ export const rowPkData = (row: Record<string, any>, columns: ColumnType[]) => {
     }
   }
   return pkData
+}
+
+export const extractPk = (columns: ColumnType[]) => {
+  if (!columns && !Array.isArray(columns)) return null
+  return columns
+    .filter((c) => c.pk)
+    .map((c) => c.title)
+    .join('___')
 }
 
 export const findIndexByPk = (pk: Record<string, string>, data: Row[]) => {
@@ -94,15 +104,23 @@ export const rowDefaultData = (columns: ColumnType[] = []) => {
     if (
       !isSystemColumn(col) &&
       !isVirtualCol(col) &&
-      !isLinksOrLTAR({ uidt: col.uidt! }) &&
       ![UITypes.Rollup, UITypes.Lookup, UITypes.Formula, UITypes.Barcode, UITypes.QrCode].includes(col.uidt) &&
-      col?.cdf
+      col?.cdf &&
+      !/^\w+\(\)|CURRENT_TIMESTAMP$/.test(col.cdf)
     ) {
       const defaultValue = col.cdf
-      acc[col.title!] = typeof defaultValue === 'string' ? defaultValue.replace(/^'/, '').replace(/'$/, '') : defaultValue
+      acc[col.title!] = typeof defaultValue === 'string' ? defaultValue.replace(/^'|'$/g, '') : defaultValue
     }
     return acc
   }, {} as Record<string, any>)
 
   return defaultData
+}
+
+export const isRowEmpty = (record: any, col: any) => {
+  if (!record || !col) return true
+  const val = record.row[col.title]
+  if (!val) return true
+
+  return Array.isArray(val) && val.length === 0
 }

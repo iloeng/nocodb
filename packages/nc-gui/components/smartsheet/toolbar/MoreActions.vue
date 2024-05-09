@@ -1,24 +1,8 @@
 <script lang="ts" setup>
 import type { RequestParams } from 'nocodb-sdk'
 import { ExportTypes } from 'nocodb-sdk'
-import {
-  ActiveViewInj,
-  FieldsInj,
-  IsLockedInj,
-  IsPublicInj,
-  MetaInj,
-  extractSdkResponseErrorMsg,
-  inject,
-  message,
-  ref,
-  storeToRefs,
-  useBase,
-  useI18n,
-  useNuxtApp,
-  useRoles,
-  useSharedView,
-  useSmartsheetStoreOrThrow,
-} from '#imports'
+import { saveAs } from 'file-saver'
+import * as XLSX from 'xlsx'
 
 const { t } = useI18n()
 
@@ -55,9 +39,6 @@ const exportFile = async (exportType: ExportTypes) => {
   let c = 1
   const responseType = exportType === ExportTypes.EXCEL ? 'base64' : 'blob'
 
-  const XLSX = await import('xlsx')
-  const FileSaver = await import('file-saver')
-
   try {
     while (!isNaN(offset) && offset > -1) {
       let res
@@ -87,7 +68,7 @@ const exportFile = async (exportType: ExportTypes) => {
         XLSX.writeFile(workbook, `${meta.value?.title}_exported_${c++}.xlsx`)
       } else if (exportType === ExportTypes.CSV) {
         const blob = new Blob([data], { type: 'text/plain;charset=utf-8' })
-        FileSaver.saveAs(blob, `${meta.value?.title}_exported_${c++}.csv`)
+        saveAs(blob, `${meta.value?.title}_exported_${c++}.csv`)
       }
       offset = +headers['nc-export-offset']
       if (offset > -1) {

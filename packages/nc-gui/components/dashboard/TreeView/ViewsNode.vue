@@ -2,17 +2,7 @@
 import type { VNodeRef } from '@vue/runtime-core'
 import type { TableType, ViewType, ViewTypes } from 'nocodb-sdk'
 import type { WritableComputedRef } from '@vue/reactivity'
-import {
-  IsLockedInj,
-  isDefaultBase as _isDefaultBase,
-  inject,
-  message,
-  onKeyStroke,
-  useDebounceFn,
-  useNuxtApp,
-  useRoles,
-  useVModel,
-} from '#imports'
+import { isDefaultBase as _isDefaultBase } from '#imports'
 
 interface Props {
   view: ViewType
@@ -52,6 +42,8 @@ const { activeView } = storeToRefs(useViewsStore())
 
 const { getMeta } = useMetas()
 
+const { meta: metaKey, control } = useMagicKeys()
+
 const table = computed(() => props.table)
 const injectedTable = ref(table.value)
 
@@ -80,10 +72,20 @@ const _title = ref<string | undefined>()
 
 /** Debounce click handler, so we can potentially enable editing view name {@see onDblClick} */
 const onClick = useDebounceFn(() => {
-  if (isEditing.value || isStopped.value) return
-
   emits('changeView', vModel.value)
 }, 250)
+
+const handleOnClick = () => {
+  if (isEditing.value || isStopped.value) return
+
+  const cmdOrCtrl = isMac() ? metaKey.value : control.value
+
+  if (cmdOrCtrl) {
+    emits('changeView', vModel.value)
+  } else {
+    onClick()
+  }
+}
 
 /** Enable editing view name on dbl click */
 function onDblClick() {
@@ -145,6 +147,10 @@ async function onRename() {
   isDropdownOpen.value = false
   if (!isEditing.value) return
 
+  if (_title.value) {
+    _title.value = _title.value.trim()
+  }
+
   const isValid = props.onValidate({ ...vModel.value, title: _title.value! })
 
   if (isValid !== true) {
@@ -204,12 +210,12 @@ watch(isDropdownOpen, async () => {
   <a-menu-item
     class="nc-sidebar-node !min-h-7 !max-h-7 !mb-0.25 select-none group text-gray-700 !flex !items-center !mt-0 hover:(!bg-gray-200 !text-gray-900) cursor-pointer"
     :class="{
-      '!pl-18 !xs:(pl-19.75)': isDefaultBase,
-      '!pl-23.5 !xs:(pl-27)': !isDefaultBase,
+      '!pl-13.5 !xs:(pl-12)': isDefaultBase,
+      '!pl-19 ': !isDefaultBase,
     }"
     :data-testid="`view-sidebar-view-${vModel.alias || vModel.title}`"
     @dblclick.stop="onDblClick"
-    @click="onClick"
+    @click.prevent="handleOnClick"
   >
     <div v-e="['a:view:open', { view: vModel.type }]" class="text-sm flex items-center w-full gap-1" data-testid="view-item">
       <div
@@ -222,7 +228,7 @@ watch(isDropdownOpen, async () => {
           :emoji="props.view?.meta?.icon"
           size="small"
           :clearable="true"
-          :readonly="isMobileMode"
+          :readonly="isMobileMode || !isUIAllowed('viewCreateOrEdit')"
           @emoji-selected="emits('selectIcon', $event)"
         >
           <template #default>
@@ -235,7 +241,7 @@ watch(isDropdownOpen, async () => {
         v-if="isEditing"
         :ref="focusInput"
         v-model:value="_title"
-        class="!bg-transparent !border-0 !ring-0 !outline-transparent !border-transparent"
+        class="!bg-transparent !border-0 !ring-0 !outline-transparent !border-transparent !pl-0 !flex-1 mr-4"
         :class="{
           'font-medium': activeView?.id === vModel.id,
         }"
@@ -254,19 +260,19 @@ watch(isDropdownOpen, async () => {
           {{ vModel.alias || vModel.title }}
         </div>
       </NcTooltip>
-      <div class="flex-1" />
 
-      <template v-if="!isEditing && !isLocked && isUIAllowed('viewCreateOrEdit')">
+      <template v-if="!isEditing && !isLocked">
         <NcDropdown v-model:visible="isDropdownOpen" overlay-class-name="!rounded-lg">
           <NcButton
             v-e="['c:view:option']"
             type="text"
             size="xxsmall"
-            class="nc-sidebar-node-btn invisible !group-hover:visible nc-sidebar-view-node-context-btn"
+            class="nc-sidebar-node-btn invisible !group-hover:(visible opacity-100) nc-sidebar-view-node-context-btn"
             :class="{
-              '!visible': isDropdownOpen,
+              '!visible !opacity-100': isDropdownOpen,
             }"
             @click.stop="isDropdownOpen = !isDropdownOpen"
+            @dblclick.stop
           >
             <GeneralIcon icon="threeDotHorizontal" class="text-xl w-4.75" />
           </NcButton>

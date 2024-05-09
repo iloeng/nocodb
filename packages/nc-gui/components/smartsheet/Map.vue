@@ -3,8 +3,6 @@ import 'leaflet/dist/leaflet.css'
 import L, { LatLng } from 'leaflet'
 import 'leaflet.markercluster'
 import { ViewTypes } from 'nocodb-sdk'
-import { IsPublicInj, OpenNewRecordFormHookInj, iconMap, latLongToJoinedString, onMounted, provide, ref } from '#imports'
-import type { Row } from '#imports'
 
 const route = useRoute()
 
@@ -175,7 +173,7 @@ reloadViewDataHook?.on(async () => {
   await loadMapData()
 })
 
-provide(ReloadRowDataHookInj, reloadViewDataHook)
+provide(ReloadRowDataHookInj, reloadViewDataHook!)
 
 watch([formattedData, mapMetaData, markersClusterGroupRef], () => {
   if (formattedData.value == null || mapMetaData.value?.fk_view_id == null || markersClusterGroupRef.value == null) {
@@ -245,7 +243,7 @@ const count = computed(() => paginationData.value.totalRows)
   </Suspense>
   <Suspense v-if="!isPublic">
     <LazySmartsheetExpandedForm
-      v-if="expandedFormOnRowIdDlg"
+      v-if="expandedFormOnRowIdDlg && meta?.id"
       v-model="expandedFormOnRowIdDlg"
       :row="{ row: {}, oldRow: {}, rowMeta: {} }"
       :meta="meta"

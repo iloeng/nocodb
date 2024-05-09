@@ -1,27 +1,7 @@
 <script lang="ts" setup>
 import type { ColumnReqType, ColumnType } from 'nocodb-sdk'
-import { UITypes, isLinksOrLTAR, isSystemColumn, isVirtualCol } from 'nocodb-sdk'
-import {
-  IsFormInj,
-  IsKanbanInj,
-  MetaInj,
-  ReloadViewDataHookInj,
-  computed,
-  inject,
-  isJSON,
-  isTextArea,
-  message,
-  onMounted,
-  ref,
-  uiTypes,
-  useBase,
-  useColumnCreateStoreOrThrow,
-  useGlobal,
-  useI18n,
-  useMetas,
-  useNuxtApp,
-  watchEffect,
-} from '#imports'
+import { UITypes, isLinksOrLTAR, isSelfReferencingTableColumn, isSystemColumn, isVirtualCol } from 'nocodb-sdk'
+
 import MdiMinusIcon from '~icons/mdi/minus-circle-outline'
 import MdiIdentifierIcon from '~icons/mdi/identifier'
 
@@ -69,7 +49,7 @@ const isKanban = inject(IsKanbanInj, ref(false))
 
 const readOnly = computed(() => props.readonly)
 
-const { isMysql, isMssql, isXcdbBase } = useBase()
+const { isMysql, isMssql, isDatabricks, isXcdbBase } = useBase()
 
 const reloadDataTrigger = inject(ReloadViewDataHookInj)
 
@@ -79,7 +59,16 @@ const mounted = ref(false)
 
 const columnToValidate = [UITypes.Email, UITypes.URL, UITypes.PhoneNumber]
 
-const onlyNameUpdateOnEditColumns = [UITypes.LinkToAnotherRecord, UITypes.Lookup, UITypes.Rollup, UITypes.Links]
+const onlyNameUpdateOnEditColumns = [
+  UITypes.LinkToAnotherRecord,
+  UITypes.Lookup,
+  UITypes.Rollup,
+  UITypes.Links,
+  UITypes.CreatedTime,
+  UITypes.LastModifiedTime,
+  UITypes.CreatedBy,
+  UITypes.LastModifiedBy,
+]
 
 // To close column type dropdown on escape and
 // close modal only when the type popup is close
@@ -163,7 +152,7 @@ onMounted(() => {
     if (formState.value.pk) {
       message.info(t('msg.info.editingPKnotSupported'))
       emit('cancel')
-    } else if (isSystemColumn(formState.value)) {
+    } else if (isSystemColumn(formState.value) && !isSelfReferencingTableColumn(formState.value)) {
       message.info(t('msg.info.editingSystemKeyNotSupported'))
       emit('cancel')
     }
@@ -198,6 +187,13 @@ onMounted(() => {
       if (!formState.value?.temp_id) {
         emit('add', formState.value)
       }
+    }
+
+    if (isForm.value && !props.fromTableExplorer) {
+      setTimeout(() => {
+        antInput.value?.focus()
+        antInput.value?.select()
+      }, 100)
     }
   })
 })
@@ -251,7 +247,7 @@ if (props.fromTableExplorer) {
       <div class="flex flex-col gap-2">
         <a-form-item v-if="isFieldsTab" v-bind="validateInfos.title" class="flex flex-grow">
           <div
-            class="flex flex-grow px-2 py-1 items-center rounded-lg bg-gray-100 focus:bg-gray-100 outline-none"
+            class="flex flex-grow px-2 py-1 items-center rounded-md bg-gray-100 focus:bg-gray-100 outline-none"
             style="outline-style: solid; outline-width: thin"
           >
             <input
@@ -272,7 +268,7 @@ if (props.fromTableExplorer) {
           <a-input
             ref="antInput"
             v-model:value="formState.title"
-            class="nc-column-name-input !rounded !mt-1"
+            class="nc-column-name-input !rounded-md !mt-1"
             :disabled="isKanban || readOnly"
             @input="onAlter(8)"
           />
@@ -288,7 +284,7 @@ if (props.fromTableExplorer) {
             <a-select
               v-model:value="formState.uidt"
               show-search
-              class="nc-column-type-input !rounded"
+              class="nc-column-type-input !rounded-md"
               :disabled="isKanban || readOnly"
               dropdown-class-name="nc-dropdown-column-type border-1 !rounded-md border-gray-200"
               @dropdown-visible-change="onDropdownChange"
@@ -300,7 +296,7 @@ if (props.fromTableExplorer) {
               </template>
               <a-select-option v-for="opt of uiTypesOptions" :key="opt.name" :value="opt.name" v-bind="validateInfos.uidt">
                 <div class="flex gap-2 items-center">
-                  <component :is="opt.icon" class="text-gray-700" />
+                  <component :is="opt.icon" class="text-gray-700 w-4 h-4" />
                   <div class="flex-1">{{ opt.name }}</div>
                   <span v-if="opt.deprecated" class="!text-xs !text-gray-300">({{ $t('general.deprecated') }})</span>
                   <component
@@ -344,6 +340,7 @@ if (props.fromTableExplorer) {
           <SmartsheetColumnSelectOptions
             v-if="formState.uidt === UITypes.SingleSelect || formState.uidt === UITypes.MultiSelect"
             v-model:value="formState"
+            :from-table-explorer="props.fromTableExplorer || false"
           />
         </template>
       </div>
@@ -370,10 +367,18 @@ if (props.fromTableExplorer) {
           !isVirtualCol(formState) &&
           !isAttachment(formState) &&
           !isMssql(meta!.source_id) &&
-          !(isMysql(meta!.source_id) && (isJSON(formState) || isTextArea(formState)))
+          !(isMysql(meta!.source_id) && (isJSON(formState) || isTextArea(formState))) &&
+          !(isDatabricks(meta!.source_id) && formState.unique)
           "
             v-model:value="formState"
           />
+
+          <div
+            v-if="isDatabricks(meta!.source_id) && !formState.cdf && ![UITypes.MultiSelect, UITypes.Checkbox, UITypes.Rating, UITypes.Attachment, UITypes.Lookup, UITypes.Rollup, UITypes.Formula, UITypes.Barcode, UITypes.QrCode, UITypes.CreatedTime, UITypes.LastModifiedTime, UITypes.CreatedBy, UITypes.LastModifiedBy].includes(formState.uidt)"
+            class="mt-3"
+          >
+            <a-checkbox v-model:checked="formState.unique"> Set as Unique </a-checkbox>
+          </div>
         </div>
 
         <div
@@ -440,7 +445,7 @@ if (props.fromTableExplorer) {
 <style lang="scss">
 .nc-column-type-input {
   .ant-select-selector {
-    @apply !rounded;
+    @apply !rounded-md;
   }
 }
 </style>

@@ -11,8 +11,6 @@ import queries from '~/db/sql-client/lib/pg/pg.queries';
 const log = new Debug('PGClient');
 
 class PGClient extends KnexClient {
-  protected queries: any;
-  protected _version: any;
   constructor(connectionConfig) {
     super(connectionConfig);
     // this.sqlClient = null;
@@ -965,28 +963,13 @@ class PGClient extends KnexClient {
       f.attnotnull as rqd,
       p.contype as cst,
       p.conname as cstn,
+      ix.indisprimary as primarykey,
+      not ix.indisunique as non_unique_original,
+      not ix.indisunique as non_unique,
       CASE
           WHEN i.oid<>0 THEN true
           ELSE false
       END AS is_index,
-      CASE
-          WHEN p.contype = 'p' THEN true
-          ELSE false
-      END AS primarykey,
-      CASE
-          WHEN p.contype = 'u' THEN 0
-      WHEN p.contype = 'p' THEN 0
-          ELSE 1
-      END AS non_unique_original,
-      CASE
-          WHEN p.contype = 'p' THEN true
-          ELSE false
-      END AS primarykey,
-      CASE
-          WHEN p.contype = 'u' THEN 0
-      WHEN p.contype = 'p' THEN 0
-          ELSE 1
-      END AS non_unique,
       CASE
           WHEN f.atthasdef = 't' THEN pg_get_expr(d.adbin, d.adrelid)
       END AS default  FROM pg_attribute f
@@ -2878,6 +2861,7 @@ class PGClient extends KnexClient {
         );
         query += n.rqd ? ' NOT NULL' : ' NULL';
         query += defaultValue ? ` DEFAULT ${defaultValue}` : '';
+        query += n.unique ? ` UNIQUE` : '';
       }
     } else if (change === 1) {
       query += this.genQuery(
@@ -2887,6 +2871,7 @@ class PGClient extends KnexClient {
       );
       query += n.rqd ? ' NOT NULL' : ' NULL';
       query += defaultValue ? ` DEFAULT ${defaultValue}` : '';
+      query += n.unique ? ` UNIQUE` : '';
       query = this.genQuery(`ALTER TABLE ?? ${query};`, [t], shouldSanitize);
     } else {
       if (n.cn !== o.cn) {

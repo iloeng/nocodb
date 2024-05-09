@@ -9,7 +9,7 @@ export const useColumnDrag = ({
   tableBodyEl: Ref<HTMLElement | undefined>
   gridWrapper: Ref<HTMLElement | undefined>
 }) => {
-  const { eventBus } = useSmartsheetStoreOrThrow()
+  const { eventBus, isDefaultView, meta } = useSmartsheetStoreOrThrow()
   const { addUndo, defineViewScope } = useUndoRedo()
 
   const { activeView } = storeToRefs(useViewsStore())
@@ -22,10 +22,32 @@ export const useColumnDrag = ({
   const dragColPlaceholderDomRef = ref<HTMLElement | null>(null)
   const toBeDroppedColId = ref<string | null>(null)
 
+  const updateDefaultViewColumnOrder = (columnId: string, order: number) => {
+    if (!meta.value?.columns) return
+
+    const colIndex = meta.value.columns.findIndex((c) => c.id === columnId)
+    if (colIndex !== -1) {
+      meta.value.columns[colIndex].meta = { ...(meta.value.columns[colIndex].meta || {}), defaultViewColOrder: order }
+      meta.value.columns = (meta.value.columns || []).map((c) => {
+        if (c.id !== columnId) return c
+
+        c.meta = { ...(c.meta || {}), defaultViewColOrder: order }
+        return c
+      })
+    }
+    if (meta.value.columnsById[columnId]) {
+      meta.value.columnsById[columnId].meta = { ...(meta.value.columnsById[columnId] || {}), defaultViewColOrder: order }
+    }
+  }
+
   const reorderColumn = async (colId: string, toColId: string) => {
     const toBeReorderedViewCol = gridViewCols.value[colId]
 
-    const toViewCol = gridViewCols.value[toColId]!
+    const toViewCol = gridViewCols.value[toColId]
+
+    // if toBeReorderedViewCol/toViewCol is null, return
+    if (!toBeReorderedViewCol || !toViewCol) return
+
     const toColIndex = fields.value.findIndex((f) => f.id === toColId)
 
     const nextToColField = toColIndex < fields.value.length - 1 ? fields.value[toColIndex + 1] : null
@@ -42,12 +64,19 @@ export const useColumnDrag = ({
 
     toBeReorderedViewCol.order = newOrder
 
+    if (isDefaultView.value && toBeReorderedViewCol.fk_column_id) {
+      updateDefaultViewColumnOrder(toBeReorderedViewCol.fk_column_id, newOrder)
+    }
+
     addUndo({
       undo: {
         fn: async () => {
           if (!fields.value) return
 
           toBeReorderedViewCol.order = oldOrder
+          if (isDefaultView.value) {
+            updateDefaultViewColumnOrder(toBeReorderedViewCol.fk_column_id, oldOrder)
+          }
           await updateGridViewColumn(colId, { order: oldOrder } as any)
 
           eventBus.emit(SmartsheetStoreEvents.FIELD_RELOAD)
@@ -59,6 +88,9 @@ export const useColumnDrag = ({
           if (!fields.value) return
 
           toBeReorderedViewCol.order = newOrder
+          if (isDefaultView.value) {
+            updateDefaultViewColumnOrder(toBeReorderedViewCol.fk_column_id, newOrder)
+          }
           await updateGridViewColumn(colId, { order: newOrder } as any)
 
           eventBus.emit(SmartsheetStoreEvents.FIELD_RELOAD)
@@ -71,6 +103,14 @@ export const useColumnDrag = ({
     await updateGridViewColumn(colId, { order: newOrder } as any, true)
 
     eventBus.emit(SmartsheetStoreEvents.FIELD_RELOAD)
+  }
+
+  const handleReorderColumn = async () => {
+    dragColPlaceholderDomRef.value!.style.left = '0px'
+    dragColPlaceholderDomRef.value!.style.height = '0px'
+    await reorderColumn(draggedCol.value!.id!, toBeDroppedColId.value!)
+    draggedCol.value = null
+    toBeDroppedColId.value = null
   }
 
   const onDragStart = (colId: string, e: DragEvent) => {
@@ -108,11 +148,7 @@ export const useColumnDrag = ({
     if (!dragColPlaceholderDomRef.value) return
 
     if (e.clientX === 0) {
-      dragColPlaceholderDomRef.value!.style.left = `0px`
-      dragColPlaceholderDomRef.value!.style.height = '0px'
-      reorderColumn(draggedCol.value!.id!, toBeDroppedColId.value!)
-      draggedCol.value = null
-      toBeDroppedColId.value = null
+      handleReorderColumn()
       return
     }
 
@@ -143,9 +179,19 @@ export const useColumnDrag = ({
     }
   }
 
+  // fallback for safari browser
+  const onDragEnd = (e: DragEvent) => {
+    e.preventDefault()
+
+    if (!e.dataTransfer || !draggedCol.value || !toBeDroppedColId.value) return
+
+    handleReorderColumn()
+  }
+
   return {
     onDrag,
     onDragStart,
+    onDragEnd,
     draggedCol,
     dragColPlaceholderDomRef,
     toBeDroppedColId,

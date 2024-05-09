@@ -1,6 +1,5 @@
 <script lang="ts" setup>
 import type { VNodeRef } from '@vue/runtime-core'
-import { EditColumnInj, EditModeInj, IsExpandedFormOpenInj, IsFormInj, inject, useVModel } from '#imports'
 
 interface Props {
   // when we set a number, then it is number type
@@ -51,7 +50,7 @@ const focus: VNodeRef = (el) =>
     v-if="editEnabled"
     :ref="focus"
     v-model="vModel"
-    class="outline-none px-1 border-none w-full h-full text-sm"
+    class="nc-cell-field outline-none px-1 border-none w-full h-full"
     type="number"
     step="0.1"
     :placeholder="isEditColumn ? $t('labels.optional') : ''"
@@ -64,8 +63,8 @@ const focus: VNodeRef = (el) =>
     @selectstart.capture.stop
     @mousedown.stop
   />
-  <span v-else-if="vModel === null && showNull" class="nc-null uppercase">{{ $t('general.null') }}</span>
-  <span v-else class="text-sm">{{ vModel }}</span>
+  <span v-else-if="vModel === null && showNull" class="nc-cell-field nc-null uppercase">{{ $t('general.null') }}</span>
+  <span v-else class="nc-cell-field">{{ vModel }}</span>
 </template>
 
 <style scoped lang="scss">

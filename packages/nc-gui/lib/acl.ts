@@ -2,7 +2,14 @@ import { OrgUserRoles, ProjectRoles } from 'nocodb-sdk'
 
 const roleScopes = {
   org: [OrgUserRoles.VIEWER, OrgUserRoles.CREATOR],
-  base: [ProjectRoles.VIEWER, ProjectRoles.COMMENTER, ProjectRoles.EDITOR, ProjectRoles.CREATOR, ProjectRoles.OWNER],
+  base: [
+    ProjectRoles.NO_ACCESS,
+    ProjectRoles.VIEWER,
+    ProjectRoles.COMMENTER,
+    ProjectRoles.EDITOR,
+    ProjectRoles.CREATOR,
+    ProjectRoles.OWNER,
+  ],
 }
 
 interface Perm {
@@ -27,9 +34,9 @@ const rolePermissions = {
       baseDelete: true,
       baseDuplicate: true,
       newUser: true,
-      tableRename: true,
-      tableDelete: true,
       viewCreateOrEdit: true,
+      baseReorder: true,
+      orgAdminPanel: true,
     },
   },
   [OrgUserRoles.VIEWER]: {

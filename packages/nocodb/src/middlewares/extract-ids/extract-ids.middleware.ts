@@ -11,8 +11,10 @@ import type {
   NestMiddleware,
 } from '@nestjs/common';
 import {
+  Audit,
   Base,
   Column,
+  Extension,
   Filter,
   FormViewColumn,
   GalleryViewColumn,
@@ -24,7 +26,7 @@ import {
   View,
 } from '~/models';
 import rolePermissions from '~/utils/acl';
-import { NcError } from '~/middlewares/catchError';
+import { NcError } from '~/helpers/catchError';
 
 export const rolesLabel = {
   [OrgUserRoles.SUPER_ADMIN]: 'Super Admin',
@@ -35,6 +37,7 @@ export const rolesLabel = {
   [ProjectRoles.VIEWER]: 'Base Viewer',
   [ProjectRoles.EDITOR]: 'Base Editor',
   [ProjectRoles.COMMENTER]: 'Base Commenter',
+  [ProjectRoles.NO_ACCESS]: 'No Access',
 };
 
 export function getRolesLabels(
@@ -81,13 +84,15 @@ export class ExtractIdsMiddleware implements NestMiddleware, CanActivate {
       params.formViewId ||
       params.gridViewId ||
       params.kanbanViewId ||
-      params.galleryViewId
+      params.galleryViewId ||
+      params.calendarViewId
     ) {
       const view = await View.get(
         params.formViewId ||
           params.gridViewId ||
           params.kanbanViewId ||
-          params.galleryViewId,
+          params.galleryViewId ||
+          params.calendarViewId,
       );
       req.ncBaseId = view?.base_id;
     } else if (params.publicDataUuid) {
@@ -122,6 +127,9 @@ export class ExtractIdsMiddleware implements NestMiddleware, CanActivate {
     } else if (params.syncId) {
       const syncSource = await SyncSource.get(req.params.syncId);
       req.ncBaseId = syncSource.base_id;
+    } else if (params.extensionId) {
+      const extension = await Extension.get(req.params.extensionId);
+      req.ncBaseId = extension.base_id;
     }
     // extract fk_model_id from query params only if it's audit post endpoint
     else if (
@@ -156,6 +164,16 @@ export class ExtractIdsMiddleware implements NestMiddleware, CanActivate {
         id: req.query?.fk_model_id,
       });
       req.ncBaseId = model?.base_id;
+    } else if (
+      [
+        '/api/v1/db/meta/audits/:auditId/comment',
+        '/api/v2/meta/audits/:auditId/comment',
+      ].some((auditPatchPath) => req.route.path === auditPatchPath) &&
+      req.method === 'PATCH' &&
+      req.params.auditId
+    ) {
+      const audit = await Audit.get(params.auditId);
+      req.ncBaseId = audit?.base_id;
     }
     // extract base id from query params only if it's userMe endpoint or webhook plugin list
     else if (
@@ -212,10 +230,14 @@ export class AclMiddleware implements NestInterceptor {
       'blockApiTokenAccess',
       context.getHandler(),
     );
+
     const scope = this.reflector.get<string>('scope', context.getHandler());
 
     const req = context.switchToHttp().getRequest();
 
+    if (!req.user?.isAuthorized) {
+      NcError.unauthorized('Invalid token');
+    }
     const userScopeRole =
       req.user.roles?.[OrgUserRoles.SUPER_ADMIN] === true
         ? OrgUserRoles.SUPER_ADMIN
@@ -235,7 +257,7 @@ export class AclMiddleware implements NestInterceptor {
     const roles: Record<string, boolean> = extractRolesObj(userScopeRole);
 
     if (req?.user?.is_api_token && blockApiTokenAccess) {
-      NcError.forbidden('Not allowed with API token');
+      NcError.apiTokenNotAllowed();
     }
     if (
       (!allowedRoles || allowedRoles.some((role) => roles?.[role])) &&

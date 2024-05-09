@@ -1,17 +1,4 @@
 <script setup lang="ts">
-import {
-  ActiveCellInj,
-  ColumnInj,
-  EditColumnInj,
-  IsFormInj,
-  ReadonlyInj,
-  getMdiIcon,
-  inject,
-  parseProp,
-  useBase,
-  useSelectedCellKeyupListener,
-} from '#imports'
-
 interface Props {
   // If the previous cell value was a text, the initial checkbox value is a string type
   // otherwise it can be either a boolean, or a string representing a boolean, i.e '0' or '1'
@@ -44,6 +31,10 @@ const isExpandedFormOpen = inject(IsExpandedFormOpenInj, ref(false))
 
 const rowHeight = inject(RowHeightInj, ref())
 
+const isSurveyForm = inject(IsSurveyFormInj, ref(false))
+
+const isGrid = inject(IsGridInj, ref(false))
+
 const checkboxMeta = computed(() => {
   return {
     icon: {
@@ -60,7 +51,7 @@ const vModel = computed<boolean | number>({
   set: (val: any) => emits('update:modelValue', isMssql(column?.value?.source_id) ? +val : val),
 })
 
-function onClick(force?: boolean, event?: MouseEvent) {
+function onClick(force?: boolean, event?: MouseEvent | KeyboardEvent) {
   if (
     (event?.target as HTMLElement)?.classList?.contains('nc-checkbox') ||
     (event?.target as HTMLElement)?.closest('.nc-checkbox')
@@ -69,6 +60,19 @@ function onClick(force?: boolean, event?: MouseEvent) {
   }
   if (!readOnly?.value && (force || active.value)) {
     vModel.value = !vModel.value
+  }
+}
+
+const keydownEnter = (e: KeyboardEvent) => {
+  if (!isSurveyForm.value) {
+    onClick(true, e)
+    e.stopPropagation()
+  }
+}
+const keydownSpace = (e: KeyboardEvent) => {
+  if (isSurveyForm.value) {
+    onClick(true, e)
+    e.stopPropagation()
   }
 }
 
@@ -90,14 +94,18 @@ useSelectedCellKeyupListener(active, (e) => {
       'w-full justify-center': !isForm && !isGallery && !isExpandedFormOpen,
       'nc-cell-hover-show': !vModel && !readOnly,
       'opacity-0': readOnly && !vModel,
+      'pointer-events-none': readOnly,
     }"
     :style="{
       height:
-        isForm || isExpandedFormOpen || isGallery || isEditColumnMenu ? undefined : `max(${(rowHeight || 1) * 1.8}rem, 41px)`,
+        isGrid && !isForm && !isExpandedFormOpen && !isEditColumnMenu
+          ? `${!rowHeight || rowHeight === 1 ? rowHeightInPx['1'] - 4 : rowHeightInPx[`${rowHeight}`] - 20}px`
+          : undefined,
     }"
-    tabindex="0"
+    :tabindex="readOnly ? -1 : 0"
     @click="onClick(false, $event)"
-    @keydown.enter.stop="onClick(true, $event)"
+    @keydown.enter="keydownEnter"
+    @keydown.space="keydownSpace($event)"
   >
     <div
       class="flex items-center"

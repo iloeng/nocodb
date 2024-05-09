@@ -2,20 +2,6 @@ import type { BaseType, OracleUi, SourceType, TableType } from 'nocodb-sdk'
 import { SqlUiFactory } from 'nocodb-sdk'
 import { isString } from '@vue/shared'
 import { acceptHMRUpdate, defineStore } from 'pinia'
-import {
-  ClientType,
-  computed,
-  createEventHook,
-  ref,
-  useApi,
-  useBases,
-  useCommandPalette,
-  useNuxtApp,
-  useRoles,
-  useRouter,
-  useTheme,
-} from '#imports'
-import type { NcProject, ProjectMetaInfo, ThemeConfig } from '#imports'
 
 export const useBase = defineStore('baseStore', () => {
   const { $e } = useNuxtApp()
@@ -102,6 +88,14 @@ export const useBase = defineStore('baseStore', () => {
 
   function isPg(sourceId?: string) {
     return getBaseType(sourceId) === 'pg'
+  }
+
+  function isSnowflake(sourceId?: string) {
+    return getBaseType(sourceId) === 'snowflake'
+  }
+
+  function isDatabricks(sourceId?: string) {
+    return getBaseType(sourceId) === 'databricks'
   }
 
   function isXcdbBase(sourceId?: string) {
@@ -284,6 +278,8 @@ export const useBase = defineStore('baseStore', () => {
     isMssql,
     isPg,
     isSqlite,
+    isSnowflake,
+    isDatabricks,
     sqlUis,
     isSharedBase,
     isSharedErd,

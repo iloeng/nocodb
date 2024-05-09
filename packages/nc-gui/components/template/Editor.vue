@@ -5,34 +5,6 @@ import type { ColumnType, TableType } from 'nocodb-sdk'
 import { UITypes, getDateFormat, getDateTimeFormat, isSystemColumn, isVirtualCol, parseStringDate } from 'nocodb-sdk'
 import type { CheckboxChangeEvent } from 'ant-design-vue/es/checkbox/interface'
 import { srcDestMappingColumns, tableColumns } from './utils'
-import {
-  Empty,
-  Form,
-  ImportWorkerOperations,
-  ImportWorkerResponse,
-  MetaInj,
-  ReloadViewDataHookInj,
-  TabType,
-  computed,
-  createEventHook,
-  extractSdkResponseErrorMsg,
-  fieldLengthValidator,
-  fieldRequiredValidator,
-  getUIDTIcon,
-  iconMap,
-  inject,
-  message,
-  nextTick,
-  onMounted,
-  reactive,
-  ref,
-  storeToRefs,
-  useBase,
-  useI18n,
-  useNuxtApp,
-  useTabs,
-  validateTableName,
-} from '#imports'
 
 const { quickImportType, baseTemplate, importData, importColumns, importDataOnly, maxRowsToParse, sourceId, importWorker } =
   defineProps<Props>()
@@ -100,9 +72,16 @@ const uiTypeOptions = ref<Option[]>(
     .filter(
       (uiType) =>
         !isVirtualCol(UITypes[uiType]) &&
-        ![UITypes.ForeignKey, UITypes.ID, UITypes.CreateTime, UITypes.LastModifiedTime, UITypes.Barcode, UITypes.Button].includes(
-          UITypes[uiType],
-        ),
+        ![
+          UITypes.ForeignKey,
+          UITypes.ID,
+          UITypes.CreatedTime,
+          UITypes.LastModifiedTime,
+          UITypes.CreatedBy,
+          UITypes.LastModifiedBy,
+          UITypes.Barcode,
+          UITypes.Button,
+        ].includes(UITypes[uiType]),
     )
     .map<Option>((uiType) => ({
       value: uiType,
@@ -299,7 +278,7 @@ function remapColNames(batchData: any[], columns: ColumnType[]) {
 function missingRequiredColumnsValidation(tn: string) {
   const missingRequiredColumns = columns.value.filter(
     (c: Record<string, any>) =>
-      (c.pk ? !c.ai && !c.cdf : !c.cdf && c.rqd) &&
+      (c.pk ? !c.ai && !c.cdf && !c.meta?.ag : !c.cdf && c.rqd) &&
       !srcDestMapping.value[tn].some((r: Record<string, any>) => r.destCn === c.title),
   )
 

@@ -1,4 +1,4 @@
-<script setup lang="ts">
+<script lang="ts" setup>
 import type { ViewType } from 'nocodb-sdk'
 import { ViewTypes } from 'nocodb-sdk'
 
@@ -36,11 +36,16 @@ async function onOpenModal({
   type,
   copyViewId,
   groupingFieldColumnId,
+  calendarRange,
 }: {
   title?: string
   type: ViewTypes
   copyViewId?: string
   groupingFieldColumnId?: string
+  calendarRange?: Array<{
+    fk_from_column_id: string
+    fk_to_column_id: string | null // for ee only
+  }>
 }) {
   if (isViewListLoading.value) return
 
@@ -62,6 +67,7 @@ async function onOpenModal({
     type,
     'tableId': table.value.id,
     'selectedViewId': copyViewId,
+    calendarRange,
     groupingFieldColumnId,
     'onUpdate:modelValue': closeDialog,
     'onCreated': async (view: ViewType) => {
@@ -100,7 +106,7 @@ async function onOpenModal({
 </script>
 
 <template>
-  <NcDropdown v-model:visible="isOpen" destroy-popup-on-hide :overlay-class-name="overlayClassName" @click.stop="isOpen = true">
+  <NcDropdown v-model:visible="isOpen" :overlay-class-name="overlayClassName" destroy-popup-on-hide @click.stop="isOpen = true">
     <slot />
     <template #overlay>
       <NcMenu class="max-w-48">
@@ -149,6 +155,17 @@ async function onOpenModal({
             <GeneralIcon v-else class="plus" icon="plus" />
           </div>
         </NcMenuItem>
+        <NcMenuItem data-testid="sidebar-view-create-calendar" @click="onOpenModal({ type: ViewTypes.CALENDAR })">
+          <div class="item">
+            <div class="item-inner">
+              <GeneralViewIcon :meta="{ type: ViewTypes.CALENDAR }" />
+              <div>{{ $t('objects.viewType.calendar') }}</div>
+            </div>
+
+            <GeneralLoader v-if="toBeCreateType === ViewTypes.CALENDAR && isViewListLoading" />
+            <GeneralIcon v-else class="plus" icon="plus" />
+          </div>
+        </NcMenuItem>
       </NcMenu>
     </template>
   </NcDropdown>
@@ -164,7 +181,7 @@ async function onOpenModal({
 }
 
 .plus {
-  @apply text-brand-400;
+  @apply text-gray-500;
 }
 </style>
 

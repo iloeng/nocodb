@@ -2,7 +2,7 @@ import type { BaseType, ColumnType, FilterType, MetaType, PaginatedType, Roles, 
 import type { I18n } from 'vue-i18n'
 import type { Theme as AntTheme } from 'ant-design-vue/es/config-provider'
 import type { UploadFile } from 'ant-design-vue'
-import type { ImportSource, ImportType, TabType } from './enums'
+import type { ImportSource, ImportType, PreFilledMode, TabType } from './enums'
 import type { rolePermissions } from './acl'
 
 interface User {
@@ -32,6 +32,9 @@ interface ProjectMetaInfo {
 interface Field {
   order: number
   show: number | boolean
+  bold: boolean | number
+  italic: boolean | number
+  underline: boolean | number
   title: string
   fk_column_id?: string
   system?: boolean
@@ -61,9 +64,29 @@ interface Row {
     commentCount?: number
     changed?: boolean
     saving?: boolean
+    ltarState?: Record<string, Record<string, any> | Record<string, any>[] | null>
+    fromExpandedForm?: boolean
     // use in datetime picker component
     isUpdatedFromCopyNPaste?: Record<string, boolean>
+    // Used in Calendar view
+    style?: Partial<CSSStyleDeclaration>
+    range?: {
+      fk_from_col: ColumnType
+      fk_to_col: ColumnType | null
+    }
+    id?: string
+    position?: string
+    dayIndex?: number
+
+    overLapIteration?: number
+    numberOfOverlaps?: number
+    minutes?: number
   }
+}
+
+interface CalendarRangeType {
+  fk_from_column_id: string
+  fk_to_column_id: string | null
 }
 
 type RolePermissions = Omit<typeof rolePermissions, 'guest' | 'admin' | 'super'>
@@ -94,6 +117,8 @@ interface SharedViewMeta extends Record<string, any> {
   theme?: Partial<ThemeConfig>
   allowCSVDownload?: boolean
   rtl?: boolean
+  preFillEnabled?: boolean
+  preFilledMode?: PreFilledMode
 }
 
 interface SharedView {
@@ -153,6 +178,7 @@ interface Group {
   children?: Group[]
   rows?: Row[]
   root?: boolean
+  displayValueProp?: string
 }
 
 interface GroupNestedIn {
@@ -175,6 +201,28 @@ type NcButtonSize = 'xxsmall' | 'xsmall' | 'small' | 'medium'
 interface SidebarTableNode extends TableType {
   isMetaLoading?: boolean
   isViewsLoading?: boolean
+}
+
+interface UsersSortType {
+  field?: 'email' | 'roles' | 'title' | 'id'
+  direction?: 'asc' | 'desc'
+}
+
+type CommandPaletteType = 'cmd-k' | 'cmd-j' | 'cmd-l'
+
+interface FormFieldsLimitOptionsType {
+  id: string
+  order: number
+  show: boolean
+}
+
+interface ImageCropperConfig {
+  stencilProps?: {
+    aspectRatio?: number
+  }
+  minHeight?: number
+  minWidth?: number
+  imageRestriction?: 'fill-area' | 'fit-area' | 'stencil' | 'none'
 }
 
 export type {
@@ -202,4 +250,9 @@ export type {
   ViewPageType,
   NcButtonSize,
   SidebarTableNode,
+  UsersSortType,
+  CommandPaletteType,
+  CalendarRangeType,
+  FormFieldsLimitOptionsType,
+  ImageCropperConfig,
 }

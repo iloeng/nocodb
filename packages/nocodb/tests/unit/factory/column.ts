@@ -27,7 +27,8 @@ const defaultColumns = function (context) {
       title: 'CreatedAt',
       dtxp: '',
       dtxs: '',
-      uidt: 'DateTime',
+      uidt: 'CreatedTime',
+      system: true,
       dt: isPg(context) ? 'timestamp without time zone' : undefined,
     },
     {
@@ -40,7 +41,8 @@ const defaultColumns = function (context) {
       title: 'UpdatedAt',
       dtxp: '',
       dtxs: '',
-      uidt: 'DateTime',
+      uidt: 'LastModifiedTime',
+      system: true,
       dt: isPg(context) ? 'timestamp without time zone' : undefined,
     },
   ];
@@ -51,7 +53,7 @@ const customColumns = function (type: string, options: any = {}) {
     case 'textBased':
       return [
         {
-          column_name: 'Id',
+          column_name: 'id',
           title: 'Id',
           uidt: UITypes.ID,
         },
@@ -84,7 +86,7 @@ const customColumns = function (type: string, options: any = {}) {
     case 'numberBased':
       return [
         {
-          column_name: 'Id',
+          column_name: 'id',
           title: 'Id',
           uidt: UITypes.ID,
         },
@@ -122,7 +124,7 @@ const customColumns = function (type: string, options: any = {}) {
     case 'dateBased':
       return [
         {
-          column_name: 'Id',
+          column_name: 'id',
           title: 'Id',
           uidt: UITypes.ID,
         },
@@ -140,7 +142,7 @@ const customColumns = function (type: string, options: any = {}) {
     case 'selectBased':
       return [
         {
-          column_name: 'Id',
+          column_name: 'id',
           title: 'Id',
           uidt: UITypes.ID,
         },
@@ -160,7 +162,7 @@ const customColumns = function (type: string, options: any = {}) {
     case 'userBased':
       return [
         {
-          column_name: 'Id',
+          column_name: 'id',
           title: 'Id',
           uidt: UITypes.ID,
         },
@@ -177,7 +179,7 @@ const customColumns = function (type: string, options: any = {}) {
         },
       ];
     case 'custom':
-      return [{ title: 'Id', column_name: 'Id', uidt: UITypes.ID }, ...options];
+      return [{ title: 'Id', column_name: 'id', uidt: UITypes.ID }, ...options];
   }
 };
 
@@ -422,6 +424,17 @@ const updateColumn = async (
   return updatedColumn;
 };
 
+const deleteColumn = async (
+  context,
+  { table, column }: { column: Column; table: Model },
+) => {
+  const res = await request(context.app)
+    .delete(`/api/v2/meta/columns/${column.id}`)
+    .set('xc-auth', context.token)
+    .send({})
+    .expect(200);
+};
+
 export {
   customColumns,
   defaultColumns,
@@ -433,4 +446,5 @@ export {
   createLtarColumn,
   updateViewColumn,
   updateColumn,
+  deleteColumn,
 };

@@ -1,26 +1,14 @@
 <script setup lang="ts">
-import type { ColumnReqType, ColumnType, FormulaType, LinkToAnotherRecordType, LookupType, RollupType } from 'nocodb-sdk'
-import { substituteColumnIdWithAliasInFormula } from 'nocodb-sdk'
 import {
-  ColumnInj,
-  IsFormInj,
-  MetaInj,
-  computed,
-  inject,
-  isBt,
-  isFormula,
-  isHm,
-  isLookup,
-  isMm,
-  isRollup,
-  isVirtualColRequired,
-  provide,
-  ref,
-  toRef,
-  useI18n,
-  useMetas,
-  useRoles,
-} from '#imports'
+  type ColumnReqType,
+  type ColumnType,
+  type FormulaType,
+  type LinkToAnotherRecordType,
+  type LookupType,
+  type RollupType,
+  isLinksOrLTAR,
+} from 'nocodb-sdk'
+import { RelationTypes, UITypes, UITypesName, substituteColumnIdWithAliasInFormula } from 'nocodb-sdk'
 
 const props = defineProps<{ column: ColumnType; hideMenu?: boolean; required?: boolean | number; hideIcon?: boolean }>()
 
@@ -46,6 +34,8 @@ const { isUIAllowed } = useRoles()
 
 const meta = inject(MetaInj, ref())
 
+const isGrid = inject(IsGridInj, ref(false))
+
 const isForm = inject(IsFormInj, ref(false))
 
 const isExpandedForm = inject(IsExpandedFormOpenInj, ref(false))
@@ -55,7 +45,7 @@ const colOptions = computed(() => column.value?.colOptions)
 const tableTile = computed(() => meta?.value?.title)
 
 const relationColumnOptions = computed<LinkToAnotherRecordType | null>(() => {
-  if (isMm(column.value) || isHm(column.value) || isBt(column.value)) {
+  if (isLinksOrLTAR(column.value)) {
     return column.value?.colOptions as LinkToAnotherRecordType
   } else if ((column?.value?.colOptions as LookupType | RollupType)?.fk_relation_column_id) {
     return meta?.value?.columns?.find(
@@ -99,6 +89,8 @@ const tooltipMsg = computed(() => {
     return `'${tableTile.value}' & '${relatedTableTitle.value}' ${t('labels.manyToMany')}`
   } else if (isBt(column.value)) {
     return `'${column?.value?.title}' ${t('labels.belongsTo')} '${relatedTableTitle.value}'`
+  } else if (isOo(column.value)) {
+    return `'${tableTile.value}' & '${relatedTableTitle.value}' ${t('labels.oneToOne')}`
   } else if (isLookup(column.value)) {
     return `'${childColumn.value.title}' from '${relatedTableTitle.value}' (${childColumn.value.uidt})`
   } else if (isFormula(column.value)) {
@@ -114,7 +106,22 @@ const tooltipMsg = computed(() => {
   return column?.value?.title || ''
 })
 
+const showTooltipAlways = computed(() => {
+  return isLinksOrLTAR(column.value) || isFormula(column.value) || isRollup(column.value) || isLookup(column.value)
+})
+
 const columnOrder = ref<Pick<ColumnReqType, 'column_order'> | null>(null)
+
+const columnTypeName = computed(() => {
+  if (column.value.uidt === UITypes.LongText && parseProp(column?.value?.meta)?.richMode) {
+    return UITypesName.RichText
+  }
+  if (column.value.uidt === UITypes.LinkToAnotherRecord && column.value.colOptions?.type === RelationTypes.ONE_TO_ONE) {
+    return UITypesName[UITypes.Links]
+  }
+
+  return column.value.uidt ? UITypesName[column.value.uidt] : ''
+})
 
 const addField = async (payload: any) => {
   columnOrder.value = payload
@@ -148,13 +155,18 @@ const openDropDown = (e: Event) => {
 
 <template>
   <div
-    class="flex items-center w-full h-full text-xs text-gray-500 font-weight-medium"
+    class="flex items-center w-full h-full text-small text-gray-500 font-weight-medium"
     @dblclick="openHeaderMenu"
     @click.right="openDropDown"
   >
-    <LazySmartsheetHeaderVirtualCellIcon v-if="column && !props.hideIcon" />
-
-    <NcTooltip placement="bottom" class="truncate name pl-1" show-on-truncate-only>
+    <template v-if="column && !props.hideIcon">
+      <NcTooltip v-if="isGrid && !isExpandedForm" class="flex items-center" placement="bottom">
+        <template #title> {{ columnTypeName }} </template>
+        <LazySmartsheetHeaderVirtualCellIcon />
+      </NcTooltip>
+      <LazySmartsheetHeaderVirtualCellIcon v-else />
+    </template>
+    <NcTooltip placement="bottom" class="truncate name pl-1" :show-on-truncate-only="!showTooltipAlways">
       <template #title>
         {{ tooltipMsg }}
       </template>

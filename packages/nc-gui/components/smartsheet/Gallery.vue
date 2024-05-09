@@ -1,30 +1,6 @@
 <script lang="ts" setup>
 import { ViewTypes, isVirtualCol } from 'nocodb-sdk'
 import type { Row as RowType } from '#imports'
-import {
-  ActiveViewInj,
-  FieldsInj,
-  IsFormInj,
-  IsGalleryInj,
-  IsGridInj,
-  MetaInj,
-  NavigateDir,
-  OpenNewRecordFormHookInj,
-  ReloadRowDataHookInj,
-  ReloadViewDataHookInj,
-  ReloadViewMetaHookInj,
-  computed,
-  createEventHook,
-  extractPkFromRow,
-  inject,
-  isImage,
-  isPrimary,
-  nextTick,
-  provide,
-  ref,
-  useAttachment,
-  useViewData,
-} from '#imports'
 
 interface Attachment {
   url: string
@@ -35,6 +11,7 @@ const view = inject(ActiveViewInj, ref())
 const reloadViewMetaHook = inject(ReloadViewMetaHookInj)
 const reloadViewDataHook = inject(ReloadViewDataHookInj)
 const openNewRecordFormHook = inject(OpenNewRecordFormHookInj, createEventHook())
+const isPublic = inject(IsPublicInj, ref(false))
 
 const { isViewDataLoading } = storeToRefs(useViewsStore())
 const { isSqlView, xWhere } = useSmartsheetStoreOrThrow()
@@ -57,6 +34,7 @@ const {
 provide(IsFormInj, ref(false))
 provide(IsGalleryInj, ref(true))
 provide(IsGridInj, ref(false))
+provide(IsCalendarInj, ref(false))
 
 provide(RowHeightInj, ref(1 as const))
 
@@ -123,7 +101,7 @@ const attachments = (record: any): Attachment[] => {
 const expandForm = (row: RowType, state?: Record<string, any>) => {
   const rowId = extractPkFromRow(row.row, meta.value!.columns!)
 
-  if (rowId) {
+  if (rowId && !isPublic.value) {
     router.push({
       query: {
         ...route.query,
@@ -174,12 +152,14 @@ reloadViewMetaHook?.on(async () => {
     reloadAttachments.value = false
   })
 })
-reloadViewDataHook?.on(async () => {
-  await loadData()
+reloadViewDataHook?.on(async (params) => {
+  await loadData({
+    ...(params?.offset !== undefined ? { offset: params.offset } : {}),
+  })
 })
 
 // provide view data reload hook as fallback to row data reload
-provide(ReloadRowDataHookInj, reloadViewDataHook)
+provide(ReloadRowDataHookInj, reloadViewDataHook!)
 
 watch(
   view,
@@ -281,7 +261,7 @@ watch(
                     <LazyCellAttachmentImage
                       v-if="isImage(attachment.title, attachment.mimetype ?? attachment.type)"
                       :key="`carousel-${record.row.id}-${index}`"
-                      class="h-52 object-cover"
+                      class="h-52 !object-contain"
                       :srcs="getPossibleAttachmentSrc(attachment)"
                       @click="expandFormClick($event, record)"
                     />
@@ -295,7 +275,7 @@ watch(
                 <LazySmartsheetVirtualCell
                   v-if="isVirtualCol(displayField)"
                   v-model="record.row[displayField.title]"
-                  class="!text-gray-600"
+                  class="!text-brand-500"
                   :column="displayField"
                   :row="record"
                 />
@@ -303,7 +283,7 @@ watch(
                 <LazySmartsheetCell
                   v-else
                   v-model="record.row[displayField.title]"
-                  class="!text-gray-600"
+                  class="!text-brand-500"
                   :column="displayField"
                   :edit-enabled="false"
                   :read-only="true"
@@ -368,7 +348,7 @@ watch(
 
   <Suspense>
     <LazySmartsheetExpandedForm
-      v-if="expandedFormOnRowIdDlg"
+      v-if="expandedFormOnRowIdDlg && meta?.id"
       v-model="expandedFormOnRowIdDlg"
       :row="{ row: {}, oldRow: {}, rowMeta: {} }"
       :meta="meta"

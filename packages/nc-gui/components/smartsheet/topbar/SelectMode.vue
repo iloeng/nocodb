@@ -1,6 +1,4 @@
 <script lang="ts" setup>
-import { storeToRefs, useViewsStore } from '#imports'
-
 const { openedViewsTab, activeView } = storeToRefs(useViewsStore())
 
 const { isUIAllowed } = useRoles()
@@ -62,9 +60,9 @@ const onClickDetails = () => {
 }
 .tab .tab-title {
   @apply min-w-0;
-  word-break: 'keep-all';
-  white-space: 'nowrap';
-  display: 'inline';
+  word-break: keep-all;
+  white-space: nowrap;
+  display: inline;
   line-height: 0.95;
 }
 

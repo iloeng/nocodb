@@ -173,6 +173,7 @@ test.describe.serial('Webhook', () => {
     // verify that the hook is not triggered (count doesn't change in this case)
     await dashboard.grid.editRow({ index: 0, value: 'Delaware' });
     await verifyHookTrigger(1, null, request);
+    await dashboard.grid.clickRow(0);
     await dashboard.grid.deleteRow(0);
     await verifyHookTrigger(1, null, request);
 
@@ -208,6 +209,7 @@ test.describe.serial('Webhook', () => {
       request,
       buildExpectedResponseData('records.after.update', 'Delaware', 'Poole')
     );
+    await dashboard.grid.clickRow(0);
     await dashboard.grid.deleteRow(0);
     await verifyHookTrigger(3, 'Delaware', request);
 
@@ -241,6 +243,7 @@ test.describe.serial('Webhook', () => {
       request,
       buildExpectedResponseData('records.after.update', 'Delaware', 'Poole')
     );
+    await dashboard.grid.clickRow(0);
     await dashboard.grid.deleteRow(0);
     await verifyHookTrigger(4, 'Delaware', request, buildExpectedResponseData('records.after.delete', 'Delaware'));
 
@@ -282,6 +285,7 @@ test.describe.serial('Webhook', () => {
     await verifyHookTrigger(0, 'Poole', request);
     await dashboard.grid.editRow({ index: 0, value: 'Delaware' });
     await verifyHookTrigger(0, 'Delaware', request);
+    await dashboard.grid.clickRow(0);
     await dashboard.grid.deleteRow(0);
 
     // for delete, the hook should be triggered (thrice in this case)
@@ -313,6 +317,7 @@ test.describe.serial('Webhook', () => {
     await verifyHookTrigger(0, '', request);
     await dashboard.grid.editRow({ index: 0, value: 'Delaware' });
     await verifyHookTrigger(0, '', request);
+    await dashboard.grid.clickRow(0);
     await dashboard.grid.deleteRow(0);
     await verifyHookTrigger(0, '', request);
   });
@@ -397,7 +402,9 @@ test.describe.serial('Webhook', () => {
       request,
       buildExpectedResponseData('records.after.update', 'Poole', 'Delaware')
     );
+    await dashboard.grid.clickRow(1);
     await dashboard.grid.deleteRow(1);
+    await dashboard.rootPage.waitForTimeout(3000);
     await dashboard.grid.deleteRow(0);
     await verifyHookTrigger(3, 'Poole', request, buildExpectedResponseData('records.after.delete', 'Poole'));
 
@@ -439,6 +446,7 @@ test.describe.serial('Webhook', () => {
       request,
       buildExpectedResponseData('records.after.update', 'Poole', 'Delaware')
     );
+    await dashboard.grid.clickRow(1);
     await dashboard.grid.deleteRow(1);
     await dashboard.grid.deleteRow(0);
     await verifyHookTrigger(8, 'Delaware', request, buildExpectedResponseData('records.after.delete', 'Delaware'));
@@ -759,9 +767,81 @@ test.describe.serial('Webhook', () => {
       }
     }
 
-    console.log('rsp', rsp[0]);
-    console.log('expectedData', expectedData);
-
     expect(isSubset(rsp[0], expectedData)).toBe(true);
+  });
+
+  test('Delete operations', async ({ request }) => {
+    async function verifyDeleteOperation(rsp, type, deleteCount) {
+      // kludge- add delay to allow server to process webhook
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      expect(rsp[rsp.length - 1].type).toBe(type);
+      expect(rsp[rsp.length - 1].data.table_name).toBe('Test');
+
+      if (deleteCount !== null) {
+        expect(rsp[rsp.length - 1].data.rows.length).toBe(deleteCount);
+      }
+    }
+
+    test.slow();
+
+    await clearServerData({ request });
+    // close 'Team & Auth' tab
+    await dashboard.closeTab({ title: 'Team & Auth' });
+    await dashboard.treeView.createTable({ title: 'Test', baseTitle: context.base.title });
+
+    // after insert hook
+    await webhook.create({
+      title: 'hook-1',
+      event: 'After Delete',
+    });
+    // after insert hook
+    await webhook.create({
+      title: 'hook-2',
+      event: 'After Bulk Delete',
+    });
+
+    const titles = ['Poole', 'Delaware', 'Pabalo', 'John', 'Vicky', 'Tom'];
+    for (let i = 0; i < titles.length; i++) {
+      await dashboard.grid.addNewRow({
+        index: i,
+        columnHeader: 'Title',
+        value: titles[i],
+      });
+    }
+
+    await dashboard.grid.clickRow(0);
+
+    // Select one record and delete
+    await dashboard.grid.selectRow(0);
+    await dashboard.grid.deleteSelectedRows();
+    let rsp = await getWebhookResponses({ request, count: 1 });
+
+    await verifyDeleteOperation(rsp, 'records.after.delete', null);
+
+    // Select multiple records and delete
+    await dashboard.grid.selectRow(0);
+    await dashboard.grid.selectRow(1);
+    await dashboard.grid.deleteSelectedRows();
+    rsp = await getWebhookResponses({ request, count: 2 });
+
+    await verifyDeleteOperation(rsp, 'records.after.bulkDelete', 2);
+
+    // Right click and delete record
+    await dashboard.grid.deleteRow(0);
+    rsp = await getWebhookResponses({ request, count: 3 });
+
+    await verifyDeleteOperation(rsp, 'records.after.delete', null);
+
+    // Select range and delete records
+    await dashboard.grid.selectRange({
+      start: { index: 0, columnHeader: 'Title' },
+      end: { index: 1, columnHeader: 'Title' },
+    });
+
+    await dashboard.grid.deleteRow(0);
+    rsp = await getWebhookResponses({ request, count: 4 });
+
+    await verifyDeleteOperation(rsp, 'records.after.bulkDelete', 2);
   });
 });

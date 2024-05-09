@@ -1,4 +1,11 @@
-import { isSystemColumn, RelationTypes, UITypes, ViewTypes } from 'nocodb-sdk';
+import {
+  isCreatedOrLastModifiedByCol,
+  isCreatedOrLastModifiedTimeCol,
+  isSystemColumn,
+  RelationTypes,
+  UITypes,
+  ViewTypes,
+} from 'nocodb-sdk';
 import type {
   Column,
   LinkToAnotherRecordColumn,
@@ -6,7 +13,13 @@ import type {
   Model,
 } from '~/models';
 import { NcError } from '~/helpers/catchError';
-import { GalleryView, KanbanView, View } from '~/models';
+import {
+  CalendarRange,
+  GalleryView,
+  GridViewColumn,
+  KanbanView,
+  View,
+} from '~/models';
 
 const getAst = async ({
   query,
@@ -21,6 +34,7 @@ const getAst = async ({
   },
   getHiddenColumn = query?.['getHiddenColumn'],
   throwErrorIfInvalidParams = false,
+  extractOnlyRangeFields = false,
 }: {
   query?: RequestQuery;
   extractOnlyPrimaries?: boolean;
@@ -30,18 +44,32 @@ const getAst = async ({
   dependencyFields?: DependantFields;
   getHiddenColumn?: boolean;
   throwErrorIfInvalidParams?: boolean;
+  // Used for calendar view
+  extractOnlyRangeFields?: boolean;
 }) => {
   // set default values of dependencyFields and nested
   dependencyFields.nested = dependencyFields.nested || {};
   dependencyFields.fieldsSet = dependencyFields.fieldsSet || new Set();
 
   let coverImageId;
+  let dependencyFieldsForCalenderView;
   if (view && view.type === ViewTypes.GALLERY) {
     const gallery = await GalleryView.get(view.id);
     coverImageId = gallery.fk_cover_image_col_id;
   } else if (view && view.type === ViewTypes.KANBAN) {
     const kanban = await KanbanView.get(view.id);
     coverImageId = kanban.fk_cover_image_col_id;
+  } else if (view && view.type === ViewTypes.CALENDAR) {
+    // const calendar = await CalendarView.get(view.id);
+    // coverImageId = calendar.fk_cover_image_col_id;
+    const calenderRanges = await CalendarRange.read(view.id);
+    if (calenderRanges) {
+      dependencyFieldsForCalenderView = calenderRanges.ranges
+        .flatMap((obj) =>
+          [obj.fk_from_column_id, (obj as any).fk_to_column_id].filter(Boolean),
+        )
+        .map(String);
+    }
   }
 
   if (!model.columns?.length) await model.getColumns();
@@ -63,6 +91,26 @@ const getAst = async ({
     return { ast, dependencyFields, parsedQuery: dependencyFields };
   }
 
+  if (extractOnlyRangeFields) {
+    const ast = {
+      ...(dependencyFieldsForCalenderView || []).reduce((o, f) => {
+        const col = model.columns.find((c) => c.id === f);
+        return { ...o, [col.title]: 1 };
+      }, {}),
+    };
+
+    await Promise.all(
+      (dependencyFieldsForCalenderView || []).map((f) =>
+        extractDependencies(
+          model.columns.find((c) => c.id === f),
+          dependencyFields,
+        ),
+      ),
+    );
+
+    return { ast, dependencyFields, parsedQuery: dependencyFields };
+  }
+
   let fields = query?.fields || query?.f;
   if (fields && fields !== '*') {
     fields = Array.isArray(fields) ? fields : fields.split(',');
@@ -73,7 +121,7 @@ const getAst = async ({
         (f) => !colAliasMap[f] && !aliasColMap[f],
       );
       if (invalidFields.length) {
-        NcError.unprocessableEntity(`Invalid field: ${invalidFields[0]}`);
+        NcError.fieldNotFound(invalidFields.join(', '));
       }
     }
   } else {
@@ -85,12 +133,17 @@ const getAst = async ({
     allowedCols = (await View.getColumns(view.id)).reduce(
       (o, c) => ({
         ...o,
-        [c.fk_column_id]: c.show,
+        [c.fk_column_id]: c.show || (c instanceof GridViewColumn && c.group_by),
       }),
       {},
     );
     if (coverImageId) {
       allowedCols[coverImageId] = 1;
+    }
+    if (dependencyFieldsForCalenderView) {
+      dependencyFieldsForCalenderView.forEach((id) => {
+        allowedCols[id] = 1;
+      });
     }
   }
 
@@ -146,16 +199,20 @@ const getAst = async ({
     }
     let isRequested;
 
-    if (getHiddenColumn) {
+    if (isCreatedOrLastModifiedByCol(col) && col.system) {
+      isRequested = false;
+    } else if (getHiddenColumn) {
       isRequested =
         !isSystemColumn(col) ||
-        col.column_name === 'created_at' ||
-        col.column_name === 'updated_at' ||
+        (isCreatedOrLastModifiedTimeCol(col) && col.system) ||
         col.pk;
     } else if (allowedCols && (!includePkByDefault || !col.pk)) {
       isRequested =
         allowedCols[col.id] &&
-        (!isSystemColumn(col) || view.show_system_fields || col.pv) &&
+        (!isSystemColumn(col) ||
+          (!view && isCreatedOrLastModifiedTimeCol(col)) ||
+          view.show_system_fields ||
+          col.pv) &&
         (!fields?.length || fields.includes(col.title)) &&
         value;
     } else if (fields?.length) {
@@ -236,7 +293,17 @@ const extractRelationDependencies = async (
       dependencyFields.fieldsSet.add(
         await relationColumnOpts.getChildColumn().then((col) => col.title),
       );
-
+      break;
+    case RelationTypes.ONE_TO_ONE:
+      if (relationColumn.meta?.bt) {
+        dependencyFields.fieldsSet.add(
+          await relationColumnOpts.getChildColumn().then((col) => col.title),
+        );
+      } else {
+        dependencyFields.fieldsSet.add(
+          await relationColumnOpts.getParentColumn().then((col) => col.title),
+        );
+      }
       break;
   }
 };

@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { ErrorMessages, RelationTypes, UITypes } from 'nocodb-sdk';
+import {
+  isCreatedOrLastModifiedByCol,
+  RelationTypes,
+  UITypes,
+} from 'nocodb-sdk';
 import { isLinksOrLTAR } from 'nocodb-sdk';
 import type { LinkToAnotherRecordColumn, LookupColumn } from '~/models';
 import { NcError } from '~/helpers/catchError';
@@ -14,10 +18,10 @@ export class PublicMetasService {
       client?: string;
     } = await View.getByUUID(param.sharedViewUuid);
 
-    if (!view) NcError.notFound('Not found');
+    if (!view) NcError.viewNotFound(param.sharedViewUuid);
 
     if (view.password && view.password !== param.password) {
-      NcError.forbidden(ErrorMessages.INVALID_SHARED_VIEW_PASSWORD);
+      NcError.invalidSharedViewPassword();
     }
 
     await view.getFilters();
@@ -37,6 +41,10 @@ export class PublicMetasService {
     view.model.columns = view.columns
       .filter((c) => {
         const column = view.model.columnsById[c.fk_column_id];
+
+        // Check if column exists to prevent processing non-existent columns
+        if (!column) return false;
+
         return (
           c.show ||
           (column.rqd && !column.cdf && !column.ai) ||
@@ -69,7 +77,11 @@ export class PublicMetasService {
 
     view.relatedMetas = relatedMetas;
 
-    if (view.model.columns.some((c) => c.uidt === UITypes.User)) {
+    if (
+      view.model.columns.some(
+        (c) => c.uidt === UITypes.User || isCreatedOrLastModifiedByCol(c),
+      )
+    ) {
       const baseUsers = await BaseUser.getUsersList({
         base_id: view.model.base_id,
       });
@@ -162,7 +174,7 @@ export class PublicMetasService {
     const base = await Base.getByUuid(param.sharedBaseUuid);
 
     if (!base) {
-      NcError.notFound();
+      NcError.baseNotFound(param.sharedBaseUuid);
     }
 
     return { base_id: base.id };

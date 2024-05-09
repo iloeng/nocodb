@@ -19,15 +19,31 @@ export class DatasService {
   constructor() {}
 
   async dataList(
-    param: PathParams & { query: any; disableOptimization?: boolean },
+    param: (PathParams | { view?: View; model: Model }) & {
+      query: any;
+      disableOptimization?: boolean;
+      ignorePagination?: boolean;
+      limitOverride?: number;
+      throwErrorIfInvalidParams?: boolean;
+    },
   ) {
-    const { model, view } = await getViewAndModelByAliasOrId(param);
+    let { model, view } = param as { view?: View; model?: Model };
+
+    if (!model) {
+      const modelAndView = await getViewAndModelByAliasOrId(
+        param as PathParams,
+      );
+      model = modelAndView.model;
+      view = modelAndView.view;
+    }
 
     return await this.getDataList({
       model,
       view,
       query: param.query,
       throwErrorIfInvalidParams: true,
+      ignorePagination: param.ignorePagination,
+      limitOverride: param.limitOverride,
     });
   }
 
@@ -136,6 +152,8 @@ export class DatasService {
     baseModel?: BaseModelSqlv2;
     throwErrorIfInvalidParams?: boolean;
     ignoreViewFilterAndSort?: boolean;
+    ignorePagination?: boolean;
+    limitOverride?: number;
   }) {
     const { model, view, query = {}, ignoreViewFilterAndSort = false } = param;
 
@@ -174,6 +192,8 @@ export class DatasService {
             await baseModel.list(listArgs, {
               ignoreViewFilterAndSort,
               throwErrorIfInvalidParams: param.throwErrorIfInvalidParams,
+              ignorePagination: param.ignorePagination,
+              limitOverride: param.limitOverride,
             }),
             {},
             listArgs,
@@ -190,6 +210,7 @@ export class DatasService {
     ]);
     return new PagedResponseImpl(data, {
       ...query,
+      ...(param.limitOverride ? { limitOverride: param.limitOverride } : {}),
       count,
     });
   }
@@ -274,7 +295,7 @@ export class DatasService {
     });
 
     if (!row) {
-      NcError.notFound('Row not found');
+      NcError.recordNotFound(param.rowId);
     }
 
     return row;
@@ -369,7 +390,7 @@ export class DatasService {
       id: view?.fk_model_id || param.viewId,
     });
 
-    if (!model) NcError.notFound('Table not found');
+    if (!model) NcError.tableNotFound(view?.fk_model_id || param.viewId);
 
     return await this.getDataList({ model, view, query: param.query });
   }
@@ -386,7 +407,7 @@ export class DatasService {
       id: view?.fk_model_id || param.viewId,
     });
 
-    if (!model) NcError.notFound('Table not found');
+    if (!model) NcError.tableNotFound(view?.fk_model_id || param.viewId);
 
     const source = await Source.get(model.source_id);
 
@@ -447,7 +468,7 @@ export class DatasService {
       id: view?.fk_model_id || param.viewId,
     });
 
-    if (!model) NcError.notFound('Table not found');
+    if (!model) NcError.tableNotFound(view?.fk_model_id || param.viewId);
 
     const source = await Source.get(model.source_id);
 
@@ -508,7 +529,7 @@ export class DatasService {
       id: view?.fk_model_id || param.viewId,
     });
 
-    if (!model) NcError.notFound('Table not found');
+    if (!model) NcError.tableNotFound(view?.fk_model_id || param.viewId);
 
     const source = await Source.get(model.source_id);
 
@@ -569,7 +590,7 @@ export class DatasService {
       id: view?.fk_model_id || param.viewId,
     });
 
-    if (!model) return NcError.notFound('Table not found');
+    if (!model) return NcError.tableNotFound(view?.fk_model_id || param.viewId);
 
     const source = await Source.get(model.source_id);
 
@@ -630,7 +651,7 @@ export class DatasService {
       id: view?.fk_model_id || param.viewId,
     });
 
-    if (!model) NcError.notFound('Table not found');
+    if (!model) NcError.tableNotFound(view?.fk_model_id || param.viewId);
 
     const source = await Source.get(model.source_id);
 
@@ -682,7 +703,7 @@ export class DatasService {
       const model = await Model.getByIdOrName({
         id: param.viewId,
       });
-      if (!model) NcError.notFound('Table not found');
+      if (!model) NcError.tableNotFound(param.viewId);
 
       const source = await Source.get(model.source_id);
 
@@ -712,7 +733,7 @@ export class DatasService {
     const model = await Model.getByIdOrName({
       id: param.viewId,
     });
-    if (!model) return NcError.notFound('Table not found');
+    if (!model) return NcError.tableNotFound(param.viewId);
 
     const source = await Source.get(model.source_id);
 
@@ -733,7 +754,7 @@ export class DatasService {
     const model = await Model.getByIdOrName({
       id: param.viewId,
     });
-    if (!model) NcError.notFound('Table not found');
+    if (!model) NcError.tableNotFound(param.viewId);
 
     const source = await Source.get(model.source_id);
 
@@ -758,7 +779,7 @@ export class DatasService {
     const model = await Model.getByIdOrName({
       id: param.viewId,
     });
-    if (!model) NcError.notFound('Table not found');
+    if (!model) NcError.tableNotFound(param.viewId);
 
     const source = await Source.get(model.source_id);
 
@@ -783,7 +804,7 @@ export class DatasService {
       id: view?.fk_model_id || param.viewId,
     });
 
-    if (!model) NcError.notFound('Table not found');
+    if (!model) NcError.tableNotFound(view?.fk_model_id || param.viewId);
 
     const source = await Source.get(model.source_id);
 
@@ -816,7 +837,7 @@ export class DatasService {
       id: view?.fk_model_id || param.viewId,
     });
 
-    if (!model) NcError.notFound('Table not found');
+    if (!model) NcError.tableNotFound(view?.fk_model_id || param.viewId);
 
     const source = await Source.get(model.source_id);
 
@@ -854,7 +875,7 @@ export class DatasService {
         titleOrId: req.params.viewName,
         fk_model_id: model.id,
       }));
-    if (!model) NcError.notFound('Table not found');
+    if (!model) NcError.tableNotFound(req.params.tableName);
     return { model, view };
   }
 
@@ -961,8 +982,7 @@ export class DatasService {
         c.column_name === columnNameOrId,
     );
 
-    if (!column)
-      NcError.notFound(`Column with id/name '${columnNameOrId}' is not found`);
+    if (!column) NcError.fieldNotFound(columnNameOrId);
 
     return column;
   }

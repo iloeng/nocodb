@@ -184,6 +184,9 @@ export default {
   STRING(args: MapFnArgs) {
     return args.fn(args.pt?.arguments?.[0]);
   },
+  BOOLEAN(args: MapFnArgs) {
+    return args.fn(args.pt?.arguments?.[0]);
+  },
   AND: async (args: MapFnArgs) => {
     return {
       builder: args.knex.raw(
@@ -379,6 +382,17 @@ export default {
 
     return {
       builder: knex.raw(`(${valueBuilder} IS NOT NULL)${colAlias}`),
+    };
+  },
+  URLENCODE: async ({ fn, knex, pt, colAlias }: MapFnArgs) => {
+    const specialCharacters = '% :/?#[]@$&+,;=';
+    let str = (await fn(pt.arguments[0])).builder;
+    // Pass the characters as bound parameters to avoid problems with ? sign.
+    for (const c of specialCharacters) {
+      str = `REPLACE(${str}, ?, '${encodeURIComponent(c)}')`;
+    }
+    return {
+      builder: knex.raw(`${str} ${colAlias}`, specialCharacters.split('')),
     };
   },
 };

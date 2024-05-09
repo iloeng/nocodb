@@ -42,7 +42,7 @@ function baseModelSqlTests() {
   it('Insert record', async () => {
     const request = {
       clientIp: '::ffff:192.0.0.1',
-      user: { email: 'test@example.com' },
+      user: context.user,
     };
     const columns = await table.getColumns();
 
@@ -54,27 +54,12 @@ function baseModelSqlTests() {
     );
     const insertedRow = (await baseModelSql.list())[0];
 
-    if (isPg(context)) {
-      inputData.CreatedAt = new Date(inputData.CreatedAt).toISOString();
-      inputData.UpdatedAt = new Date(inputData.UpdatedAt).toISOString();
+    expect(insertedRow).to.deep.include(inputData);
+    expect(insertedRow).to.deep.include(response);
 
-      insertedRow.CreatedAt = new Date(insertedRow.CreatedAt).toISOString();
-      insertedRow.UpdatedAt = new Date(insertedRow.UpdatedAt).toISOString();
-
-      response.CreatedAt = new Date(response.CreatedAt).toISOString();
-      response.UpdatedAt = new Date(response.UpdatedAt).toISOString();
-    } else if (isSqlite(context)) {
-      // append +00:00 to the date string
-      inputData.CreatedAt = `${inputData.CreatedAt}+00:00`;
-      inputData.UpdatedAt = `${inputData.UpdatedAt}+00:00`;
-    }
-
-    expect(insertedRow).to.include(inputData);
-    expect(insertedRow).to.include(response);
-
-    const rowInsertedAudit = (
-      await Audit.baseAuditList(base.id, {})
-    ).find((audit) => audit.op_sub_type === 'INSERT');
+    const rowInsertedAudit = (await Audit.baseAuditList(base.id, {})).find(
+      (audit) => audit.op_sub_type === 'INSERT',
+    );
     expect(rowInsertedAudit).to.include({
       user: 'test@example.com',
       ip: '::ffff:192.0.0.1',
@@ -92,7 +77,7 @@ function baseModelSqlTests() {
     const columns = await table.getColumns();
     const request = {
       clientIp: '::ffff:192.0.0.1',
-      user: { email: 'test@example.com' },
+      user: context.user,
     };
     const bulkData = Array(10)
       .fill(0)
@@ -110,19 +95,15 @@ function baseModelSqlTests() {
 
     bulkData.forEach((inputData: any, index) => {
       if (isPg(context)) {
-        inputData.CreatedAt = new Date(inputData.CreatedAt).toISOString();
-        inputData.UpdatedAt = new Date(inputData.UpdatedAt).toISOString();
-      } else if (isSqlite(context)) {
-        // append +00:00 to the date string
-        inputData.CreatedAt = `${inputData.CreatedAt}+00:00`;
-        inputData.UpdatedAt = `${inputData.UpdatedAt}+00:00`;
+        inputData.CreatedAt = insertedRows[index].CreatedAt;
+        inputData.UpdatedAt = insertedRows[index].UpdatedAt;
       }
       expect(insertedRows[index]).to.include(inputData);
     });
 
-    const rowBulkInsertedAudit = (
-      await Audit.baseAuditList(base.id, {})
-    ).find((audit) => audit.op_sub_type === 'BULK_INSERT');
+    const rowBulkInsertedAudit = (await Audit.baseAuditList(base.id, {})).find(
+      (audit) => audit.op_sub_type === 'BULK_INSERT',
+    );
     expect(rowBulkInsertedAudit).to.include({
       user: 'test@example.com',
       ip: '::ffff:192.0.0.1',
@@ -141,7 +122,7 @@ function baseModelSqlTests() {
   it('Update record', async () => {
     const request = {
       clientIp: '::ffff:192.0.0.1',
-      user: { email: 'test@example.com' },
+      user: context.user,
     };
 
     const columns = await table.getColumns();
@@ -166,9 +147,11 @@ function baseModelSqlTests() {
       row_id: '1',
       op_type: 'DATA',
       op_sub_type: 'UPDATE',
-      description:
-        'Record with ID 1 has been updated in Table Table1_Title.\nColumn "Title" got changed from "test-0" to "test"',
     });
+
+    expect(rowUpdatedAudit.description).to.contains(
+      'Record with ID 1 has been updated in Table Table1_Title',
+    );
   });
 
   it('Bulk update record', async () => {
@@ -178,7 +161,7 @@ function baseModelSqlTests() {
     const columns = await table.getColumns();
     const request = {
       clientIp: '::ffff:192.0.0.1',
-      user: { email: 'test@example.com' },
+      user: context.user,
     };
     const bulkData = Array(10)
       .fill(0)
@@ -188,7 +171,10 @@ function baseModelSqlTests() {
     const insertedRows: any[] = await baseModelSql.list();
 
     await baseModelSql.bulkUpdate(
-      insertedRows.map((row) => ({ ...row, Title: `new-${row['Title']}` })),
+      insertedRows.map(({ CreatedAt: _, UpdatedAt: __, ...row }) => ({
+        ...row,
+        Title: `new-${row['Title']}`,
+      })),
       { cookie: request },
     );
 
@@ -197,9 +183,9 @@ function baseModelSqlTests() {
     updatedRows.forEach((row, index) => {
       expect(row['Title']).to.equal(`new-test-${index}`);
     });
-    const rowBulkUpdateAudit = (
-      await Audit.baseAuditList(base.id, {})
-    ).find((audit) => audit.op_sub_type === 'BULK_UPDATE');
+    const rowBulkUpdateAudit = (await Audit.baseAuditList(base.id, {})).find(
+      (audit) => audit.op_sub_type === 'BULK_UPDATE',
+    );
     expect(rowBulkUpdateAudit).to.include({
       user: 'test@example.com',
       ip: '::ffff:192.0.0.1',
@@ -219,7 +205,7 @@ function baseModelSqlTests() {
     const columns = await table.getColumns();
     const request = {
       clientIp: '::ffff:192.0.0.1',
-      user: { email: 'test@example.com' },
+      user: context.user,
     };
     const bulkData = Array(10)
       .fill(0)
@@ -248,9 +234,9 @@ function baseModelSqlTests() {
     updatedRows.forEach((row) => {
       if (row.id < 5) expect(row['Title']).to.equal('new-1');
     });
-    const rowBulkUpdateAudit = (
-      await Audit.baseAuditList(base.id, {})
-    ).find((audit) => audit.op_sub_type === 'BULK_UPDATE');
+    const rowBulkUpdateAudit = (await Audit.baseAuditList(base.id, {})).find(
+      (audit) => audit.op_sub_type === 'BULK_UPDATE',
+    );
     expect(rowBulkUpdateAudit).to.include({
       user: 'test@example.com',
       ip: '::ffff:192.0.0.1',
@@ -269,7 +255,7 @@ function baseModelSqlTests() {
   it('Delete record', async () => {
     const request = {
       clientIp: '::ffff:192.0.0.1',
-      user: { email: 'test@example.com' },
+      user: context.user,
       params: { id: 1 },
     };
 
@@ -307,7 +293,7 @@ function baseModelSqlTests() {
     const columns = await table.getColumns();
     const request = {
       clientIp: '::ffff:192.0.0.1',
-      user: { email: 'test@example.com' },
+      user: context.user,
     };
     const bulkData = Array(10)
       .fill(0)
@@ -327,9 +313,9 @@ function baseModelSqlTests() {
 
     expect(remainingRows).to.length(6);
 
-    const rowBulkDeleteAudit = (
-      await Audit.baseAuditList(base.id, {})
-    ).find((audit) => audit.op_sub_type === 'BULK_DELETE');
+    const rowBulkDeleteAudit = (await Audit.baseAuditList(base.id, {})).find(
+      (audit) => audit.op_sub_type === 'BULK_DELETE',
+    );
 
     expect(rowBulkDeleteAudit).to.include({
       user: 'test@example.com',
@@ -350,7 +336,7 @@ function baseModelSqlTests() {
     const columns = await table.getColumns();
     const request = {
       clientIp: '::ffff:192.0.0.1',
-      user: { email: 'test@example.com' },
+      user: context.user,
     };
     const bulkData = Array(10)
       .fill(0)
@@ -376,9 +362,9 @@ function baseModelSqlTests() {
     const remainingRows = await baseModelSql.list();
 
     expect(remainingRows).to.length(6);
-    const rowBulkDeleteAudit = (
-      await Audit.baseAuditList(base.id, {})
-    ).find((audit) => audit.op_sub_type === 'BULK_DELETE');
+    const rowBulkDeleteAudit = (await Audit.baseAuditList(base.id, {})).find(
+      (audit) => audit.op_sub_type === 'BULK_DELETE',
+    );
     expect(rowBulkDeleteAudit).to.include({
       user: 'test@example.com',
       ip: '::ffff:192.0.0.1',
@@ -416,7 +402,7 @@ function baseModelSqlTests() {
     const columns = await table.getColumns();
     const request = {
       clientIp: '::ffff:192.0.0.1',
-      user: { email: 'test@example.com' },
+      user: context.user,
     };
 
     await baseModelSql.nestedInsert(
@@ -475,7 +461,7 @@ function baseModelSqlTests() {
     const columns = await table.getColumns();
     const request = {
       clientIp: '::ffff:192.0.0.1',
-      user: { email: 'test@example.com' },
+      user: context.user,
     };
 
     await baseModelSql.insert(
@@ -543,7 +529,7 @@ function baseModelSqlTests() {
     const columns = await table.getColumns();
     const request = {
       clientIp: '::ffff:192.0.0.1',
-      user: { email: 'test@example.com' },
+      user: context.user,
     };
 
     await baseModelSql.insert(

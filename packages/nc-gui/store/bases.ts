@@ -2,16 +2,20 @@ import { acceptHMRUpdate, defineStore } from 'pinia'
 import type { BaseType, OracleUi, ProjectUserReqType, RequestParams, SourceType } from 'nocodb-sdk'
 import { SqlUiFactory } from 'nocodb-sdk'
 import { isString } from '@vue/shared'
-import { useWorkspace } from '#imports'
-import type { NcProject, User } from '#imports'
 
 // todo: merge with base store
 export const useBases = defineStore('basesStore', () => {
   const { $api } = useNuxtApp()
 
+  const { isUIAllowed } = useRoles()
+
   const bases = ref<Map<string, NcProject>>(new Map())
 
-  const basesList = computed<NcProject[]>(() => Array.from(bases.value.values()).sort((a, b) => a.updated_at - b.updated_at))
+  const basesList = computed<NcProject[]>(() =>
+    Array.from(bases.value.values()).sort(
+      (a, b) => (a.order != null ? a.order : Infinity) - (b.order != null ? b.order : Infinity),
+    ),
+  )
   const basesUser = ref<Map<string, User[]>>(new Map())
 
   const router = useRouter()
@@ -92,25 +96,32 @@ export const useBases = defineStore('basesStore', () => {
   const loadProjects = async (page: 'recent' | 'shared' | 'starred' | 'workspace' = 'recent') => {
     // if shared base then get the shared base and create a list
     if (route.value.params.typeOrId === 'base' && route.value.params.baseId) {
-      const { base_id } = await $api.public.sharedBaseGet(route.value.params.baseId as string)
-      const base: BaseType = await $api.base.read(base_id)
+      try {
+        const { base_id } = await $api.public.sharedBaseGet(route.value.params.baseId as string)
+        const base: BaseType = await $api.base.read(base_id)
 
-      if (!base) return
+        if (!base) return
 
-      bases.value = [base].reduce((acc, base) => {
-        acc.set(base.id!, base)
-        return acc
-      }, new Map())
+        bases.value = [base].reduce((acc, base) => {
+          acc.set(base.id!, base)
+          return acc
+        }, new Map())
 
-      bases.value.set(base.id!, {
-        ...(bases.value.get(base.id!) || {}),
-        ...base,
-        sources: [...(base.sources ?? bases.value.get(base.id!)?.sources ?? [])],
-        isExpanded: route.value.params.baseId === base.id || bases.value.get(base.id!)?.isExpanded,
-        isLoading: false,
-      })
+        bases.value.set(base.id!, {
+          ...(bases.value.get(base.id!) || {}),
+          ...base,
+          sources: [...(base.sources ?? bases.value.get(base.id!)?.sources ?? [])],
+          isExpanded: route.value.params.baseId === base.id || bases.value.get(base.id!)?.isExpanded,
+          isLoading: false,
+        })
 
-      return
+        return
+      } catch (e: any) {
+        if (e?.response?.status === 404) {
+          return router.push('/error/404')
+        }
+        throw e
+      }
     }
 
     const activeWorkspace = workspaceStore.activeWorkspace
@@ -139,6 +150,8 @@ export const useBases = defineStore('basesStore', () => {
         })
         return acc
       }, new Map())
+
+      await updateIfBaseOrderIsNullOrDuplicate()
     } catch (e) {
       console.error(e)
       message.error(e.message)
@@ -186,6 +199,7 @@ export const useBases = defineStore('basesStore', () => {
       isExpanded: route.value.params.baseId === baseId || existingProject.isExpanded,
       // isLoading is managed by Sidebar
       isLoading: existingProject.isLoading,
+      meta: { ...parseProp(existingProject.meta), ...parseProp(_project.meta) },
     }
 
     bases.value.set(baseId, base)
@@ -207,8 +221,17 @@ export const useBases = defineStore('basesStore', () => {
   }
 
   const updateProject = async (baseId: string, baseUpdatePayload: BaseType) => {
+    const existingProject = bases.value.get(baseId) ?? ({} as any)
+
+    const base = {
+      ...existingProject,
+      ...baseUpdatePayload,
+    }
+
+    bases.value.set(baseId, { ...base, meta: parseProp(base.meta) })
+
     await api.base.update(baseId, baseUpdatePayload)
-    // todo: update base in store
+
     await loadProject(baseId, true)
   }
 
@@ -217,11 +240,15 @@ export const useBases = defineStore('basesStore', () => {
     workspaceId?: string
     type: string
     linkedDbProjectIds?: string[]
+    meta?: Record<string, unknown>
   }) => {
     const result = await api.base.create(
       {
         title: basePayload.title,
         linked_db_project_ids: basePayload.linkedDbProjectIds,
+        meta: JSON.stringify({
+          ...(basePayload.meta || {}),
+        }),
       },
       {
         baseURL: getBaseUrl('nc'),
@@ -278,6 +305,46 @@ export const useBases = defineStore('basesStore', () => {
     }
 
     await navigateTo(`/nc/${baseId}`)
+  }
+
+  async function updateIfBaseOrderIsNullOrDuplicate() {
+    if (!isUIAllowed('baseReorder')) return
+
+    const basesArray = Array.from(bases.value.values())
+
+    const baseOrderSet = new Set()
+    let hasNullOrDuplicates = false
+
+    // Check if basesArray contains null or duplicate order
+    for (const base of basesArray) {
+      if (base.order === null || baseOrderSet.has(base.order)) {
+        hasNullOrDuplicates = true
+        break
+      }
+      baseOrderSet.add(base.order)
+    }
+
+    if (!hasNullOrDuplicates) return
+
+    // update the local state and return updated bases payload
+    const updatedBasesOrder = basesArray.map((base, i) => {
+      bases.value.set(base.id!, { ...base, order: i + 1 })
+
+      return {
+        id: base.id,
+        order: i + 1,
+      }
+    })
+
+    try {
+      await Promise.all(
+        updatedBasesOrder.map(async (base) => {
+          await api.base.update(base.id!, { order: base.order })
+        }),
+      )
+    } catch (e: any) {
+      message.error(await extractSdkResponseErrorMsg(e))
+    }
   }
 
   onMounted(() => {

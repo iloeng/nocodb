@@ -8,6 +8,7 @@ import genRollupSelectv2 from '~/db/genRollupSelectv2';
 import { sanitize } from '~/helpers/sqlSanitize';
 import { Base, BaseUser, Sort } from '~/models';
 import generateLookupSelectQuery from '~/db/generateLookupSelectQuery';
+import { getRefColumnIfAlias } from '~/helpers';
 
 export default async function sortV2(
   baseModelSqlv2: BaseModelSqlv2,
@@ -29,10 +30,10 @@ export default async function sortV2(
     } else {
       sort = new Sort(_sort);
     }
-    const column = await sort.getColumn();
+    const column = await getRefColumnIfAlias(await sort.getColumn());
     if (!column) {
       if (throwErrorIfInvalid) {
-        NcError.unprocessableEntity(`Invalid field: ${sort.fk_column_id}`);
+        NcError.fieldNotFound(sort.fk_column_id);
       }
       continue;
     }
@@ -64,9 +65,11 @@ export default async function sortV2(
               (
                 await column.getColOptions<FormulaColumn>()
               ).formula,
-              alias,
+              null,
               model,
               column,
+              {},
+              alias,
             )
           ).builder;
           qb.orderBy(builder, sort.direction || 'asc', nulls);
@@ -138,7 +141,9 @@ export default async function sortV2(
         }
         break;
       }
-      case UITypes.User: {
+      case UITypes.User:
+      case UITypes.CreatedBy:
+      case UITypes.LastModifiedBy: {
         const base = await Base.get(model.base_id);
         const baseUsers = await BaseUser.getUsersList({
           base_id: base.id,

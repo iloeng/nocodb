@@ -27,11 +27,19 @@ export const replaceUrlsWithLink = (text: string): boolean | string => {
   return found && out
 }
 
-export const isValidURL = (str: string) => {
-  return isURL(`${str}`)
+export const isValidURL = (str: string, extraProps?) => {
+  return isURL(`${str}`, extraProps)
 }
 
 export const openLink = (path: string, baseURL?: string, target = '_blank') => {
   const url = new URL(path, baseURL)
   window.open(url.href, target, 'noopener,noreferrer')
+}
+
+export const navigateToBlankTargetOpenOption = {
+  target: '_blank',
+  windowFeatures: {
+    noopener: true,
+    noreferrer: true,
+  },
 }

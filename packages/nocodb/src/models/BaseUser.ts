@@ -3,7 +3,7 @@ import type { BaseType } from 'nocodb-sdk';
 import type User from '~/models/User';
 import Base from '~/models/Base';
 import {
-  // CacheDelDirection,
+  CacheDelDirection,
   CacheGetType,
   CacheScope,
   MetaTable,
@@ -24,6 +24,47 @@ export default class BaseUser {
 
   protected static castType(baseUser: BaseUser): BaseUser {
     return baseUser && new BaseUser(baseUser);
+  }
+
+  public static async bulkInsert(
+    baseUsers: Partial<BaseUser>[],
+    ncMeta = Noco.ncMeta,
+  ) {
+    const insertObj = baseUsers.map((baseUser) =>
+      extractProps(baseUser, ['fk_user_id', 'base_id', 'roles']),
+    );
+
+    const bulkData = await ncMeta.bulkMetaInsert(
+      null,
+      null,
+      MetaTable.PROJECT_USERS,
+      insertObj,
+      true,
+    );
+
+    const uniqueFks: string[] = [
+      ...new Set(bulkData.map((d) => d.base_id)),
+    ] as string[];
+
+    for (const fk of uniqueFks) {
+      await NocoCache.deepDel(
+        `${CacheScope.BASE_USER}:${fk}:list`,
+        CacheDelDirection.PARENT_TO_CHILD,
+      );
+    }
+
+    for (const d of bulkData) {
+      await NocoCache.set(
+        `${CacheScope.BASE_USER}:${d.base_id}:${d.fk_user_id}`,
+        d,
+      );
+
+      await NocoCache.appendToList(
+        CacheScope.BASE_USER,
+        [d.base_id],
+        `${CacheScope.BASE_USER}:${d.base_id}:${d.fk_user_id}`,
+      );
+    }
   }
 
   public static async insert(
@@ -122,6 +163,15 @@ export default class BaseUser {
     const cachedList = await NocoCache.getList(CacheScope.BASE_USER, [base_id]);
     let { list: baseUsers } = cachedList;
     const { isNoneList } = cachedList;
+
+    const fullVersionCols = [
+      'invite_token',
+      'main_roles',
+      'created_at',
+      'base_id',
+      'roles',
+    ];
+
     if (!isNoneList && !baseUsers.length) {
       const queryBuilder = ncMeta
         .knex(MetaTable.USERS)
@@ -129,15 +179,11 @@ export default class BaseUser {
           `${MetaTable.USERS}.id`,
           `${MetaTable.USERS}.email`,
           `${MetaTable.USERS}.display_name`,
-          ...(mode === 'full'
-            ? [
-                `${MetaTable.USERS}.invite_token`,
-                `${MetaTable.USERS}.roles as main_roles`,
-                `${MetaTable.USERS}.created_at as created_at`,
-                `${MetaTable.PROJECT_USERS}.base_id`,
-                `${MetaTable.PROJECT_USERS}.roles as roles`,
-              ]
-            : []),
+          `${MetaTable.USERS}.invite_token`,
+          `${MetaTable.USERS}.roles as main_roles`,
+          `${MetaTable.USERS}.created_at as created_at`,
+          `${MetaTable.PROJECT_USERS}.base_id`,
+          `${MetaTable.PROJECT_USERS}.roles as roles`,
         );
 
       queryBuilder.leftJoin(MetaTable.PROJECT_USERS, function () {
@@ -163,6 +209,17 @@ export default class BaseUser {
         'base_id',
         'id',
       ]);
+    }
+
+    if (mode === 'full') {
+      return baseUsers;
+    }
+
+    // remove full version props if viewer
+    for (const user of baseUsers) {
+      for (const prop of fullVersionCols) {
+        delete user[prop];
+      }
     }
 
     return baseUsers;
@@ -205,17 +262,8 @@ export default class BaseUser {
     roles: string,
     ncMeta = Noco.ncMeta,
   ) {
-    // get existing cache
-    const key = `${CacheScope.BASE_USER}:${baseId}:${userId}`;
-    const o = await NocoCache.get(key, CacheGetType.TYPE_OBJECT);
-    if (o) {
-      o.roles = roles;
-      // set cache
-      await NocoCache.set(key, o);
-    }
-
     // set meta
-    return await ncMeta.metaUpdate(
+    const res = await ncMeta.metaUpdate(
       null,
       null,
       MetaTable.PROJECT_USERS,
@@ -227,6 +275,12 @@ export default class BaseUser {
         base_id: baseId,
       },
     );
+
+    await NocoCache.update(`${CacheScope.BASE_USER}:${baseId}:${userId}`, {
+      roles,
+    });
+
+    return res;
   }
 
   static async update(
@@ -237,18 +291,17 @@ export default class BaseUser {
   ) {
     const updateObj = extractProps(baseUser, ['starred', 'hidden', 'order']);
 
-    const key = `${CacheScope.BASE_USER}:${baseId}:${userId}`;
-
     // set meta
     await ncMeta.metaUpdate(null, null, MetaTable.PROJECT_USERS, updateObj, {
       fk_user_id: userId,
       base_id: baseId,
     });
 
-    // delete cache
-    await NocoCache.del(key);
+    await NocoCache.update(
+      `${CacheScope.BASE_USER}:${baseId}:${userId}`,
+      updateObj,
+    );
 
-    // cache and return
     return await this.get(baseId, userId, ncMeta);
   }
 
@@ -265,8 +318,10 @@ export default class BaseUser {
     );
 
     // delete list cache to refresh list
-    await NocoCache.del(`${CacheScope.BASE_USER}:${baseId}:${userId}`);
-    await NocoCache.del(`${CacheScope.BASE_USER}:${baseId}:list`);
+    await NocoCache.deepDel(
+      `${CacheScope.BASE_USER}:${baseId}:list`,
+      CacheDelDirection.PARENT_TO_CHILD,
+    );
 
     return response;
   }
@@ -352,20 +407,30 @@ export default class BaseUser {
     qb.whereNot(`${MetaTable.PROJECT}.deleted`, true);
 
     const baseList = await qb;
-    if (baseList?.length) {
-      // parse meta
-      for (const base of baseList) {
-        base.meta = parseMetaProp(base);
-      }
+
+    if (baseList && baseList?.length) {
+      const promises = [];
+
+      const castedProjectList = baseList
+        .filter((p) => !params?.type || p.type === params.type)
+        .sort(
+          (a, b) =>
+            (a.order != null ? a.order : Infinity) -
+            (b.order != null ? b.order : Infinity),
+        )
+        .map((p) => {
+          const base = Base.castType(p);
+          base.meta = parseMetaProp(base);
+          promises.push(base.getSources(ncMeta));
+          return base;
+        });
+
+      await Promise.all(promises);
+
+      return castedProjectList;
+    } else {
+      return [];
     }
-
-    const castedProjectList = baseList
-      .filter((p) => !params?.type || p.type === params.type)
-      .map((m) => Base.castType(m));
-
-    await Promise.all(castedProjectList.map((base) => base.getSources(ncMeta)));
-
-    return castedProjectList;
   }
 
   static async updateOrInsert(

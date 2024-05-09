@@ -1,31 +1,5 @@
 import type { ComputedRef, Ref } from 'vue'
 import type { Api, ColumnType, KanbanType, SelectOptionType, SelectOptionsType, TableType, ViewType } from 'nocodb-sdk'
-import type { Row, UndoRedoAction } from '#imports'
-import {
-  IsPublicInj,
-  SharedViewPasswordInj,
-  deepCompare,
-  enumColor,
-  extractPkFromRow,
-  extractSdkResponseErrorMsg,
-  inject,
-  message,
-  parseProp,
-  provide,
-  ref,
-  rowPkData,
-  storeToRefs,
-  useApi,
-  useBase,
-  useFieldQuery,
-  useI18n,
-  useInjectionState,
-  useNuxtApp,
-  useRoles,
-  useSharedView,
-  useSmartsheetStoreOrThrow,
-  useUndoRedo,
-} from '#imports'
 
 type GroupingFieldColOptionsType = SelectOptionType & { collapsed: boolean }
 
@@ -211,7 +185,7 @@ const [useProvideKanbanViewStore, useKanbanViewStore] = useInjectionState(
 
       const { fk_grp_col_id, meta: stack_meta } = kanbanMetaData.value
 
-      stackMetaObj.value = stack_meta ? JSON.parse(stack_meta as string) : {}
+      stackMetaObj.value = parseProp(stack_meta) || {}
 
       if (stackMetaObj.value && fk_grp_col_id && stackMetaObj.value[fk_grp_col_id]) {
         // keep the existing order (index of the array) but update the values done outside kanban

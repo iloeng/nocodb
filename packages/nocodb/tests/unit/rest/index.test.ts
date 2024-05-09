@@ -13,8 +13,12 @@ import groupByTest from './tests/groupby.test';
 import formulaTests from './tests/formula.test';
 
 let workspaceTest = () => {};
+let ssoTest = () => {};
+let cloudOrgTest = () => {};
 if (process.env.EE === 'true') {
   workspaceTest = require('./tests/ee/workspace.test').default;
+  ssoTest = require('./tests/ee/sso.test').default;
+  cloudOrgTest = require('./tests/ee/cloud-org.test').default;
 }
 // import layoutTests from './tests/layout.test';
 // import widgetTest from './tests/widget.test';
@@ -33,6 +37,8 @@ function restTests() {
   groupByTest();
   workspaceTest();
   formulaTests();
+  ssoTest();
+  cloudOrgTest();
 
   // Enable for dashboard feature
   // widgetTest();

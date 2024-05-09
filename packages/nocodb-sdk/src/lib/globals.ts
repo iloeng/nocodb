@@ -1,4 +1,4 @@
-import { OrgUserRoles, ProjectRoles, WorkspaceUserRoles } from "./enums";
+import { OrgUserRoles, ProjectRoles, WorkspaceUserRoles } from './enums';
 
 export enum ViewTypes {
   FORM = 1,
@@ -6,6 +6,7 @@ export enum ViewTypes {
   GRID = 3,
   KANBAN = 4,
   MAP = 5,
+  CALENDAR = 6,
 }
 
 export enum ProjectTypes {
@@ -19,16 +20,12 @@ export enum RelationTypes {
   HAS_MANY = 'hm',
   BELONGS_TO = 'bt',
   MANY_TO_MANY = 'mm',
+  ONE_TO_ONE = 'oo',
 }
 
 export enum ExportTypes {
   EXCEL = 'excel',
   CSV = 'csv',
-}
-
-export enum ErrorMessages {
-  INVALID_SHARED_VIEW_PASSWORD = 'INVALID_SHARED_VIEW_PASSWORD',
-  NOT_IMPLEMENTED = 'NOT_IMPLEMENTED',
 }
 
 export enum AuditOperationTypes {
@@ -121,6 +118,33 @@ export enum TiptapMarksTypes {
   link = 'link',
   code = 'code',
   underline = 'underline',
+}
+
+export enum NcDataErrorCodes {
+  NC_ERR_MM_MODEL_NOT_FOUND = 'NC_ERR_MM_MODEL_NOT_FOUND',
+}
+
+export enum NcErrorType {
+  AUTHENTICATION_REQUIRED = 'AUTHENTICATION_REQUIRED',
+  API_TOKEN_NOT_ALLOWED = 'API_TOKEN_NOT_ALLOWED',
+  WORKSPACE_NOT_FOUND = 'WORKSPACE_NOT_FOUND',
+  BASE_NOT_FOUND = 'BASE_NOT_FOUND',
+  SOURCE_NOT_FOUND = 'SOURCE_NOT_FOUND',
+  TABLE_NOT_FOUND = 'TABLE_NOT_FOUND',
+  VIEW_NOT_FOUND = 'VIEW_NOT_FOUND',
+  FIELD_NOT_FOUND = 'FIELD_NOT_FOUND',
+  RECORD_NOT_FOUND = 'RECORD_NOT_FOUND',
+  ERROR_DUPLICATE_RECORD = 'ERROR_DUPLICATE_RECORD',
+  USER_NOT_FOUND = 'USER_NOT_FOUND',
+  INVALID_OFFSET_VALUE = 'INVALID_OFFSET_VALUE',
+  INVALID_LIMIT_VALUE = 'INVALID_LIMIT_VALUE',
+  INVALID_FILTER = 'INVALID_FILTER',
+  INVALID_SHARED_VIEW_PASSWORD = 'INVALID_SHARED_VIEW_PASSWORD',
+  NOT_IMPLEMENTED = 'NOT_IMPLEMENTED',
+  INTERNAL_SERVER_ERROR = 'INTERNAL_SERVER_ERROR',
+  DATABASE_ERROR = 'DATABASE_ERROR',
+  UNKNOWN_ERROR = 'UNKNOWN_ERROR',
+  BAD_JSON = 'BAD_JSON',
 }
 
 type Roles = OrgUserRoles | ProjectRoles | WorkspaceUserRoles;

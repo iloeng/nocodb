@@ -90,6 +90,26 @@ export interface AttachmentReqType {
 }
 
 /**
+ * Model for Attachment Response
+ */
+export type AttachmentResType = {
+  /** The mimetype of the attachment */
+  mimetype?: string;
+  /** The attachment stored path */
+  path?: string;
+  /** The size of the attachment */
+  size?: number;
+  /** The title of the attachment used in UI */
+  title?: string;
+  /** The attachment stored url */
+  url?: string;
+  /** Attachment signedPath will allow to access attachment directly */
+  signedPath?: string;
+  /** Attachment signedUrl will allow to access attachment directly */
+  signedUrl?: string;
+} | null;
+
+/**
  * Model for File Request
  */
 export interface FileReqType {
@@ -276,7 +296,8 @@ export interface SourceType {
     | 'oracledb'
     | 'pg'
     | 'snowflake'
-    | 'sqlite3';
+    | 'sqlite3'
+    | 'databricks';
 }
 
 /**
@@ -322,7 +343,8 @@ export interface BaseReqType {
     | 'oracledb'
     | 'pg'
     | 'snowflake'
-    | 'sqlite3';
+    | 'sqlite3'
+    | 'databricks';
 }
 
 /**
@@ -433,7 +455,7 @@ export interface ColumnType {
     | 'Checkbox'
     | 'Collaborator'
     | 'Count'
-    | 'CreateTime'
+    | 'CreatedTime'
     | 'Currency'
     | 'Date'
     | 'DateTime'
@@ -464,7 +486,9 @@ export interface ColumnType {
     | 'Year'
     | 'QrCode'
     | 'Links'
-    | 'User';
+    | 'User'
+    | 'CreatedBy'
+    | 'LastModifiedBy';
   /** Is Unsigned? */
   un?: BoolType;
   /** Is unique? */
@@ -824,8 +848,8 @@ export interface FollowerType {
 export interface FormType {
   /** Unique ID */
   id?: IdType;
-  /** Banner Image URL. Not in use currently. */
-  banner_image_url?: StringOrNullType;
+  /** Banner Image URL */
+  banner_image_url?: AttachmentResType;
   /** Form Columns */
   columns?: FormColumnType[];
   /** Email to sned after form is submitted */
@@ -850,25 +874,25 @@ export interface FormType {
    * @example collaborative
    */
   lock_type?: 'collaborative' | 'locked' | 'personal';
-  /** Logo URL. Not in use currently. */
-  logo_url?: StringOrNullType;
+  /** Logo URL */
+  logo_url?: AttachmentResType;
   /** Meta Info for this view */
   meta?: MetaType;
   /** The numbers of seconds to redirect after form submission */
   redirect_after_secs?: StringOrNullType;
   /** URL to redirect after submission */
-  redirect_url?: StringOrNullType;
+  redirect_url?: TextOrNullType;
   /** Show `Blank Form` after 5 seconds */
   show_blank_form?: BoolType;
   /**
    * The subheading of the form
    * @example My Form Subheading
    */
-  subheading?: string;
+  subheading?: TextOrNullType;
   /** Show `Submit Another Form` button */
   submit_another_form?: BoolType;
   /** Custom message after the form is successfully submitted */
-  success_msg?: StringOrNullType;
+  success_msg?: TextOrNullType;
   /**
    * Form View Title
    * @example Form View 1
@@ -880,8 +904,8 @@ export interface FormType {
  * Model for Form Update Request
  */
 export interface FormUpdateReqType {
-  /** Banner Image URL. Not in use currently. */
-  banner_image_url?: StringOrNullType;
+  /** Banner Image URL */
+  banner_image_url?: AttachmentReqType | null;
   /** Email to sned after form is submitted */
   email?: StringOrNullType;
   /**
@@ -889,22 +913,25 @@ export interface FormUpdateReqType {
    * @example My Form
    */
   heading?: string;
-  /** Logo URL. Not in use currently. */
-  logo_url?: StringOrNullType;
+  /** Logo URL */
+  logo_url?: AttachmentReqType | null;
   /** Meta Info for this view */
   meta?: MetaType;
   /** The numbers of seconds to redirect after form submission */
   redirect_after_secs?: StringOrNullType;
   /** URL to redirect after submission */
-  redirect_url?: StringOrNullType;
+  redirect_url?: TextOrNullType;
   /** Show `Blank Form` after 5 seconds */
   show_blank_form?: BoolType;
-  /** The subheading of the form */
-  subheading?: StringOrNullType;
+  /**
+   * The subheading of the form
+   * @example My Form Subheading
+   */
+  subheading?: TextOrNullType;
   /** Show `Submit Another Form` button */
   submit_another_form?: BoolType;
   /** Custom message after the form is successfully submitted */
-  success_msg?: StringOrNullType;
+  success_msg?: TextOrNullType;
 }
 
 /**
@@ -913,16 +940,16 @@ export interface FormUpdateReqType {
 export interface FormColumnType {
   /** Unique ID */
   id?: IdType;
-  /** Form Column Description (Not in use) */
-  description?: StringOrNullType;
+  /** Form Column Description */
+  description?: TextOrNullType;
   /** Foreign Key to Column */
   fk_column_id?: IdType;
   /** Foreign Key to View */
   fk_view_id?: IdType;
-  /** Form Column Help Text */
-  help?: StringOrNullType;
+  /** Form Column Help Text (Not in use) */
+  help?: TextOrNullType;
   /** Form Column Label */
-  label?: StringOrNullType;
+  label?: TextOrNullType;
   /** Meta Info */
   meta?: MetaType;
   /**
@@ -947,12 +974,12 @@ export interface FormColumnType {
  * Model for Form Column Request
  */
 export interface FormColumnReqType {
-  /** Form Column Description (Not in use) */
-  description?: StringOrNullType;
-  /** Form Column Help Text */
-  help?: StringOrNullType;
+  /** Form Column Description */
+  description?: TextOrNullType;
+  /** Form Column Help Text (Not in use) */
+  help?: TextOrNullType;
   /** Form Column Label */
-  label?: StringOrNullType;
+  label?: TextOrNullType;
   /** Meta Info */
   meta?: MetaType;
   /** The order among all the columns in the form */
@@ -1505,6 +1532,92 @@ export interface KanbanUpdateReqType {
 }
 
 /**
+ * Model for Calendar
+ */
+export interface CalendarType {
+  /** Unique ID */
+  id?: IdType;
+  /** View ID */
+  fk_view_id?: IdType;
+  /** Cover Image Column ID */
+  fk_cover_image_col_id?: StringOrNullType;
+  /** Calendar Columns */
+  columns?: CalendarColumnType[];
+  /** Calendar Date Range */
+  calendar_range?: CalendarRangeType[];
+  /** Meta Info for Kanban */
+  meta?: MetaType;
+  /**
+   * Kanban Title
+   * @example My Kanban
+   */
+  title?: string;
+}
+
+/**
+ * Model for Calendar Column
+ */
+export interface CalendarColumnType {
+  /** Unique ID */
+  id?: IdType;
+  /** Foreign Key to Column */
+  fk_column_id?: IdType;
+  /** Foreign Key to View */
+  fk_view_id?: IdType;
+  /**
+   * Baes ID
+   *
+   */
+  source_id?: IdType;
+  /** Base ID */
+  base_id?: IdType;
+  /** Base ID */
+  title?: string;
+  /** Is this column shown? */
+  show?: BoolType;
+  /** Is this column shown as bold? */
+  bold?: BoolType;
+  /** Is this column shown as italic? */
+  italic?: BoolType;
+  /** Is this column shown underlines? */
+  underline?: BoolType;
+  /**
+   * Column Order
+   * @example 1
+   */
+  order?: number;
+}
+
+/**
+ * Model for Calendar Date Range
+ */
+export interface CalendarRangeType {
+  /** Foreign Key to Column */
+  fk_from_column_id?: IdType;
+  /** Foreign Key to View */
+  fk_view_id?: StringOrNullType;
+  /** Base ID */
+  label?: string;
+}
+
+/**
+ * Model for Calendar Update Request
+ */
+export interface CalendarUpdateReqType {
+  /** Foreign Key to Cover Image Column */
+  fk_cover_image_col_id?: StringOrNullType;
+  /**
+   * Calendar Title
+   * @example Calendar 01
+   */
+  title?: string;
+  /** Calendar Columns */
+  calendar_range?: CalendarRangeType[];
+  /** Meta Info */
+  meta?: MetaType;
+}
+
+/**
  * Model for Kanban Request
  */
 export interface LicenseReqType {
@@ -1526,7 +1639,7 @@ export interface LinkToAnotherColumnReqType {
   /** The title of the virtual column */
   title: string;
   /** The type of the relationship */
-  type: 'bt' | 'hm' | 'mm';
+  type: 'bt' | 'hm' | 'mm' | 'oo';
   /** Abstract type of the relationship */
   uidt: 'LinkToAnotherRecord' | 'Links';
   /** Is this relationship virtual? */
@@ -1751,7 +1864,7 @@ export interface NormalColumnRequestType {
     | 'Checkbox'
     | 'Collaborator'
     | 'Count'
-    | 'CreateTime'
+    | 'CreatedTime'
     | 'Currency'
     | 'Date'
     | 'DateTime'
@@ -1782,7 +1895,9 @@ export interface NormalColumnRequestType {
     | 'Year'
     | 'QrCode'
     | 'Links'
-    | 'User';
+    | 'User'
+    | 'CreatedBy'
+    | 'LastModifiedBy';
   /** Is this column unique? */
   un?: BoolType;
   /** Is this column unique? */
@@ -1812,6 +1927,11 @@ export interface PaginatedType {
    * @example 1
    */
   page?: number;
+  /**
+   * The current offset and it will be present only when the page is not included
+   * @example 1
+   */
+  offset?: number;
   /**
    * The number of pages
    * @example 10
@@ -2029,6 +2149,8 @@ export interface ProjectReqType {
   type?: 'database' | 'documentation' | 'dashboard';
   /** List of Linked Database Base IDs (only used for Dashboard Projects so far) */
   linked_db_project_ids?: string[];
+  /** Base Meta */
+  meta?: MetaType;
 }
 
 /**
@@ -2054,16 +2176,19 @@ export interface ProjectUpdateReqType {
   status?: StringOrNullType;
   /** List of Linked Database Base IDs (only used for Dashboard Projects so far) */
   linked_db_project_ids?: string[];
+  /**
+   * The order of the list of projects.
+   * @min 0
+   * @example 1
+   */
+  order?: number;
 }
 
 /**
  * Model for Base User Request
  */
 export interface ProjectUserReqType {
-  /**
-   * Base User Email
-   * @format email
-   */
+  /** Base User Email */
   email: string;
   /** Base User Role */
   roles:
@@ -2304,6 +2429,17 @@ export interface SortReqType {
 }
 
 /**
+ * Model for TextOrNull
+ */
+export type TextOrNullType = string | null;
+
+/**
+ * Model for CalendarRangeOrNull
+ * @example [{"id":"kvc_2skkg5mi1eb37f","fk_from_column_id":"cl_hzos4ghyncqi4k","fk_to_column_id":"cl_hzos4ghyncqi4k","fk_view_id":"vw_wqs4zheuo5lgdy","label":"string"}]
+ */
+export type CalendarRangeOrNullType = null | CalendarRangeType[];
+
+/**
  * Model for StringOrNull
  */
 export type StringOrNullType = string | null;
@@ -2493,7 +2629,8 @@ export interface ViewType {
     | GridType
     | KanbanType
     | MapType
-    | (FormType & GalleryType & GridType & KanbanType & MapType);
+    | CalendarType
+    | (FormType & GalleryType & GridType & KanbanType & MapType & CalendarType);
 }
 
 /**
@@ -2523,6 +2660,8 @@ export interface ViewCreateReqType {
   fk_grp_col_id?: StringOrNullType;
   /** Foreign Key to Geo Data Column. Used in creating Map View. */
   fk_geo_data_col_id?: StringOrNullType;
+  /** Calendar Range or Null */
+  calendar_range?: CalendarRangeOrNullType;
 }
 
 /**
@@ -2768,6 +2907,94 @@ export interface UserFieldRecordType {
   display_name?: string;
   email: string;
   deleted?: boolean;
+}
+
+export type NestedListCopyPasteOrDeleteAllReqType = {
+  operation: 'copy' | 'paste' | 'deleteAll';
+  rowId: string;
+  columnId: string;
+  fk_related_model_id: string;
+}[];
+
+/**
+ * Model for Kanban Column Request
+ */
+export interface KanbanColumnReqType {
+  /** Title */
+  title?: string;
+  /** Is this column shown? */
+  show?: BoolType;
+  /**
+   * Column Order
+   * @example 1
+   */
+  order?: number;
+}
+
+/**
+ * Model for Gallery Column Request
+ */
+export interface GalleryColumnReqType {
+  /** Show */
+  show?: BoolType;
+  /**
+   * Order
+   * @example 1
+   */
+  order?: number;
+}
+
+/**
+ * Model for Calendar Column Request
+ */
+export interface CalendarColumnReqType {
+  /** Is this column shown? */
+  show?: BoolType;
+  /** Is this column shown as bold? */
+  bold?: BoolType;
+  /** Is this column shown as italic? */
+  italic?: BoolType;
+  /** Is this column shown underlines? */
+  underline?: BoolType;
+  /**
+   * Column Order
+   * @example 1
+   */
+  order?: number;
+}
+
+export interface ExtensionType {
+  /** Unique ID */
+  id?: IdType;
+  /** Unique Base ID */
+  base_id?: IdType;
+  /** Unique User ID */
+  fk_user_id?: IdType;
+  /** Extension ID */
+  extension_id?: string;
+  /** Extension Title */
+  title?: string;
+  /** Key Value Store for the extension */
+  kv_store?: MetaType;
+  /** Meta data for the extension */
+  meta?: MetaType;
+  /** Order of the extension */
+  order?: number;
+}
+
+export interface ExtensionReqType {
+  /** Unique Base ID */
+  base_id?: IdType;
+  /** Extension Title */
+  title?: string;
+  /** Extension ID */
+  extension_id?: string;
+  /** Key Value Store for the extension */
+  kv_store?: MetaType;
+  /** Meta data for the extension */
+  meta?: MetaType;
+  /** Order of the extension */
+  order?: number;
 }
 
 import type {
@@ -6788,6 +7015,102 @@ export class Api<
         format: 'json',
         ...params,
       }),
+
+    /**
+ * @description Create a new Calendar View
+ * 
+ * @tags DB View
+ * @name CalendarCreate
+ * @summary Create Calendar View
+ * @request POST:/api/v1/db/meta/tables/{tableId}/calendars
+ * @response `200` `ViewType` OK
+ * @response `400` `{
+  \** @example BadRequest [Error]: <ERROR MESSAGE> *\
+  msg: string,
+
+}`
+ */
+    calendarCreate: (
+      tableId: IdType,
+      data: ViewCreateReqType,
+      params: RequestParams = {}
+    ) =>
+      this.request<
+        ViewType,
+        {
+          /** @example BadRequest [Error]: <ERROR MESSAGE> */
+          msg: string;
+        }
+      >({
+        path: `/api/v1/db/meta/tables/${tableId}/calendars`,
+        method: 'POST',
+        body: data,
+        type: ContentType.Json,
+        format: 'json',
+        ...params,
+      }),
+
+    /**
+ * @description Update the Calendar View data with Calendar ID
+ * 
+ * @tags DB View
+ * @name CalendarUpdate
+ * @summary Update Calendar View
+ * @request PATCH:/api/v1/db/meta/calendars/{calendarViewId}
+ * @response `200` `number` OK
+ * @response `400` `{
+  \** @example BadRequest [Error]: <ERROR MESSAGE> *\
+  msg: string,
+
+}`
+ */
+    calendarUpdate: (
+      calendarViewId: string,
+      data: CalendarUpdateReqType,
+      params: RequestParams = {}
+    ) =>
+      this.request<
+        number,
+        {
+          /** @example BadRequest [Error]: <ERROR MESSAGE> */
+          msg: string;
+        }
+      >({
+        path: `/api/v1/db/meta/calendars/${calendarViewId}`,
+        method: 'PATCH',
+        body: data,
+        type: ContentType.Json,
+        format: 'json',
+        ...params,
+      }),
+
+    /**
+ * @description Get the Calendar View data by Calendar ID
+ * 
+ * @tags DB View
+ * @name CalendarRead
+ * @summary Get Calendar View
+ * @request GET:/api/v1/db/meta/calendars/{calendarViewId}
+ * @response `200` `CalendarType` OK
+ * @response `400` `{
+  \** @example BadRequest [Error]: <ERROR MESSAGE> *\
+  msg: string,
+
+}`
+ */
+    calendarRead: (calendarViewId: string, params: RequestParams = {}) =>
+      this.request<
+        CalendarType,
+        {
+          /** @example BadRequest [Error]: <ERROR MESSAGE> */
+          msg: string;
+        }
+      >({
+        path: `/api/v1/db/meta/calendars/${calendarViewId}`,
+        method: 'GET',
+        format: 'json',
+        ...params,
+      }),
   };
   dbViewShare = {
     /**
@@ -7482,6 +7805,8 @@ export class Api<
         sortArrJson?: string;
         /** Used for multiple filter queries */
         filterArrJson?: string;
+        /** Comma separated list of pks */
+        pks?: string;
       },
       params: RequestParams = {}
     ) =>
@@ -8056,7 +8381,7 @@ export class Api<
       baseName: string,
       tableName: string,
       rowId: any,
-      relationType: 'mm' | 'hm' | 'bt',
+      relationType: 'mm' | 'hm' | 'bt' | 'oo',
       columnName: string,
       query?: {
         /** @min 1 */
@@ -8104,7 +8429,7 @@ export class Api<
       baseName: string,
       tableName: string,
       rowId: any,
-      relationType: 'mm' | 'hm' | 'bt',
+      relationType: 'mm' | 'hm' | 'bt' | 'oo',
       columnName: string,
       refRowId: string,
       query?: {
@@ -8171,7 +8496,7 @@ export class Api<
       baseName: string,
       tableName: string,
       rowId: any,
-      relationType: 'mm' | 'hm' | 'bt',
+      relationType: 'mm' | 'hm' | 'bt' | 'oo',
       columnName: string,
       refRowId: string,
       params: RequestParams = {}
@@ -8211,7 +8536,7 @@ export class Api<
       baseName: string,
       tableName: string,
       rowId: any,
-      relationType: 'mm' | 'hm' | 'bt',
+      relationType: 'mm' | 'hm' | 'bt' | 'oo',
       columnName: string,
       query?: {
         /** @min 1 */
@@ -8673,7 +8998,192 @@ export class Api<
         ...params,
       }),
   };
+  dbCalendarViewRow = {
+    /**
+     * @description List all rows in Calendar View of a Table
+     *
+     * @tags DB Calendar View Row
+     * @name List
+     * @summary List rows in Calendar View of a Table
+     * @request GET:/api/v1/db/calendar-data/{orgs}/{baseName}/{tableName}/views/{viewName}
+     */
+    list: (
+      orgs: string,
+      baseName: string,
+      tableName: string,
+      viewName: string,
+      query: {
+        from_date: string;
+        to_date: string;
+        fields?: any[];
+        sort?: any[];
+        where?: string;
+        /** Query params for nested data */
+        nested?: any;
+        offset?: number;
+      },
+      params: RequestParams = {}
+    ) =>
+      this.request<any, any>({
+        path: `/api/v1/db/calendar-data/${orgs}/${baseName}/${tableName}/views/${viewName}`,
+        method: 'GET',
+        query: query,
+        ...params,
+      }),
+
+    /**
+     * @description List all rows in Calendar View of a Table
+     *
+     * @tags DB Calendar View Row
+     * @name PublicDataCalendarRowList
+     * @summary List rows in Calendar View of a Table
+     * @request GET:/api/v1/db/public/calendar-view/{sharedViewUuid}
+     */
+    publicDataCalendarRowList: (
+      sharedViewUuid: string,
+      query: {
+        from_date: string;
+        to_date: string;
+        fields?: any[];
+        sort?: any[];
+        where?: string;
+        /** Query params for nested data */
+        nested?: any;
+        offset?: number;
+      },
+      params: RequestParams = {}
+    ) =>
+      this.request<any, any>({
+        path: `/api/v1/db/public/calendar-view/${sharedViewUuid}`,
+        method: 'GET',
+        query: query,
+        ...params,
+      }),
+  };
+  api = {
+    /**
+     * No description
+     *
+     * @name ResponsesApi
+     * @request RESPONSES:/api/v1/db/calendar-data/{orgs}/{baseName}/{tableName}/views/{viewName}
+     */
+    responsesApi: (
+      orgs: string,
+      baseName: string,
+      tableName: string,
+      viewName: string,
+      params: RequestParams = {}
+    ) =>
+      this.request<any, any>({
+        path: `/api/v1/db/calendar-data/${orgs}/${baseName}/${tableName}/views/${viewName}`,
+        method: 'RESPONSES',
+        ...params,
+      }),
+
+    /**
+     * No description
+     *
+     * @name ResponsesApi2
+     * @request RESPONSES:/api/v1/db/public/calendar-view/{sharedViewUuid}
+     * @originalName responsesApi
+     * @duplicate
+     */
+    responsesApi2: (sharedViewUuid: string, params: RequestParams = {}) =>
+      this.request<any, any>({
+        path: `/api/v1/db/public/calendar-view/${sharedViewUuid}`,
+        method: 'RESPONSES',
+        ...params,
+      }),
+  };
+  dbCalendarViewRowCount = {
+    /**
+ * @description Get the count of table view rows grouped by the dates
+ * 
+ * @tags DB Calendar View Row Count
+ * @name DbCalendarViewRowCount
+ * @summary Count of Records in Dates in Calendar View
+ * @request GET:/api/v1/db/calendar-data/{orgs}/{baseName}/{tableName}/views/{viewName}/countByDate/
+ * @response `200` `any` OK
+ * @response `400` `{
+  \** @example BadRequest [Error]: <ERROR MESSAGE> *\
+  msg: string,
+
+}`
+ */
+    dbCalendarViewRowCount: (
+      orgs: string,
+      baseName: string,
+      tableName: string,
+      viewName: string,
+      query: {
+        from_date: string;
+        to_date: string;
+        sort?: any[];
+        where?: string;
+        /** @min 1 */
+        limit?: number;
+        /** @min 0 */
+        offset?: number;
+      },
+      params: RequestParams = {}
+    ) =>
+      this.request<
+        any,
+        {
+          /** @example BadRequest [Error]: <ERROR MESSAGE> */
+          msg: string;
+        }
+      >({
+        path: `/api/v1/db/calendar-data/${orgs}/${baseName}/${tableName}/views/${viewName}/countByDate/`,
+        method: 'GET',
+        query: query,
+        format: 'json',
+        ...params,
+      }),
+  };
   public = {
+    /**
+ * No description
+ * 
+ * @tags Public
+ * @name DataCalendarRowCount
+ * @summary Count of Records in Dates in Calendar View
+ * @request GET:/api/v1/db/public/calendar-view/{sharedViewUuid}/countByDate
+ * @response `200` `any` OK
+ * @response `400` `{
+  \** @example BadRequest [Error]: <ERROR MESSAGE> *\
+  msg: string,
+
+}`
+ */
+    dataCalendarRowCount: (
+      sharedViewUuid: string,
+      query: {
+        from_date: string;
+        to_date: string;
+        sort?: any[];
+        where?: string;
+        /** @min 1 */
+        limit?: number;
+        /** @min 0 */
+        offset?: number;
+      },
+      params: RequestParams = {}
+    ) =>
+      this.request<
+        any,
+        {
+          /** @example BadRequest [Error]: <ERROR MESSAGE> */
+          msg: string;
+        }
+      >({
+        path: `/api/v1/db/public/calendar-view/${sharedViewUuid}/countByDate`,
+        method: 'GET',
+        query: query,
+        format: 'json',
+        ...params,
+      }),
+
     /**
  * @description List Shared View Grouped Data
  * 
@@ -8788,6 +9298,8 @@ export class Api<
         sortArrJson?: string;
         /** Used for multiple filter queries */
         filterArrJson?: string;
+        /** Comma separated list of pks */
+        pks?: string;
       },
       params: RequestParams = {}
     ) =>
@@ -8918,7 +9430,7 @@ export class Api<
     dataNestedList: (
       sharedViewUuid: string,
       rowId: any,
-      relationType: 'mm' | 'hm' | 'bt',
+      relationType: 'mm' | 'hm' | 'bt' | 'oo',
       columnName: string,
       query?: {
         /** Which fields to be shown */
@@ -9390,7 +9902,8 @@ export class Api<
           | 'oracledb'
           | 'pg'
           | 'snowflake'
-          | 'sqlite3';
+          | 'sqlite3'
+          | 'databricks';
         connection?: {
           host?: string;
           port?: string;
@@ -9451,7 +9964,7 @@ export class Api<
    * DB Type
    * @example mysql2
    *\
-  client?: "mssql" | "mysql" | "mysql2" | "oracledb" | "pg" | "snowflake" | "sqlite3",
+  client?: "mssql" | "mysql" | "mysql2" | "oracledb" | "pg" | "snowflake" | "sqlite3" | "databricks",
   \** Connection Config *\
   connection?: {
   \** DB User *\
@@ -9497,7 +10010,8 @@ export class Api<
             | 'oracledb'
             | 'pg'
             | 'snowflake'
-            | 'sqlite3';
+            | 'sqlite3'
+            | 'databricks';
           /** Connection Config */
           connection?: {
             /** DB User */
@@ -9748,6 +10262,8 @@ export class Api<
   galleryCount?: number,
   \** Kanban Count *\
   kanbanCount?: number,
+  \** Calendar Count *\
+  calendarCount?: number,
   \** Total View Count *\
   total?: number,
   \** Shared Form Count *\
@@ -9758,6 +10274,8 @@ export class Api<
   sharedGalleryCount?: number,
   \** Shared Kanban Count *\
   sharedKanbanCount?: number,
+  \** Shared Calendar Count *\
+  sharedCalendarCount?: number,
   \** Shared Total View Count *\
   sharedTotal?: number,
   \** Shared Locked View Count *\
@@ -9813,6 +10331,8 @@ export class Api<
               galleryCount?: number;
               /** Kanban Count */
               kanbanCount?: number;
+              /** Calendar Count */
+              calendarCount?: number;
               /** Total View Count */
               total?: number;
               /** Shared Form Count */
@@ -9823,6 +10343,8 @@ export class Api<
               sharedGalleryCount?: number;
               /** Shared Kanban Count */
               sharedKanbanCount?: number;
+              /** Shared Calendar Count */
+              sharedCalendarCount?: number;
               /** Shared Total View Count */
               sharedTotal?: number;
               /** Shared Locked View Count */
@@ -9896,6 +10418,25 @@ export class Api<
       >({
         path: `/api/v1/db/meta/cache`,
         method: 'DELETE',
+        format: 'json',
+        ...params,
+      }),
+
+    /**
+     * @description Get dynamic command palette suggestions based on scope
+     *
+     * @tags Utils
+     * @name CommandPalette
+     * @summary Get command palette suggestions
+     * @request POST:/api/v1/command_palette
+     * @response `200` `any` OK
+     */
+    commandPalette: (data: any, params: RequestParams = {}) =>
+      this.request<any, any>({
+        path: `/api/v1/command_palette`,
+        method: 'POST',
+        body: data,
+        type: ContentType.Json,
         format: 'json',
         ...params,
       }),
@@ -10575,6 +11116,8 @@ export class Api<
         sortArrJson?: string;
         /** Used for multiple filter queries */
         filterArrJson?: string;
+        /** Comma separated list of pks */
+        pks?: string;
       },
       params: RequestParams = {}
     ) =>
@@ -10642,7 +11185,7 @@ export class Api<
  * @tags DB Data Table Row
  * @name Update
  * @summary Update Table Rows
- * @request PUT:/api/v2/tables/{tableId}/records
+ * @request PATCH:/api/v2/tables/{tableId}/records
  * @response `200` `any` OK
  * @response `400` `{
   \** @example BadRequest [Error]: <ERROR MESSAGE> *\
@@ -10667,7 +11210,7 @@ export class Api<
         }
       >({
         path: `/api/v2/tables/${tableId}/records`,
-        method: 'PUT',
+        method: 'PATCH',
         query: query,
         body: data,
         type: ContentType.Json,
@@ -10952,6 +11495,144 @@ export class Api<
         query: query,
         body: data,
         type: ContentType.Json,
+        format: 'json',
+        ...params,
+      }),
+
+    /**
+ * @description Copy links from the one cell and paste them into another cell or delete all records from cell
+ * 
+ * @tags DB Data Table Row
+ * @name NestedListCopyPasteOrDeleteAll
+ * @summary Copy paste or deleteAll nested link
+ * @request POST:/api/v2/tables/{tableId}/links/{columnId}/records
+ * @response `200` `any` OK
+ * @response `400` `{
+  \** @example BadRequest [Error]: <ERROR MESSAGE> *\
+  msg: string,
+
+}`
+ */
+    nestedListCopyPasteOrDeleteAll: (
+      tableId: string,
+      columnId: string,
+      data: NestedListCopyPasteOrDeleteAllReqType,
+      query?: {
+        /** View ID */
+        viewId?: string;
+      },
+      params: RequestParams = {}
+    ) =>
+      this.request<
+        any,
+        {
+          /** @example BadRequest [Error]: <ERROR MESSAGE> */
+          msg: string;
+        }
+      >({
+        path: `/api/v2/tables/${tableId}/links/${columnId}/records`,
+        method: 'POST',
+        query: query,
+        body: data,
+        type: ContentType.Json,
+        format: 'json',
+        ...params,
+      }),
+  };
+  extensions = {
+    /**
+ * @description Get all extensions for a given base
+ * 
+ * @tags Extensions
+ * @name List
+ * @summary Get Extensions
+ * @request GET:/api/v2/extensions/{baseId}
+ * @response `200` `{
+  list?: (object)[],
+
+}` OK
+ */
+    list: (baseId: IdType, params: RequestParams = {}) =>
+      this.request<
+        {
+          list?: object[];
+        },
+        any
+      >({
+        path: `/api/v2/extensions/${baseId}`,
+        method: 'GET',
+        format: 'json',
+        ...params,
+      }),
+
+    /**
+     * @description Create a new extension for a given base
+     *
+     * @tags Extensions
+     * @name Create
+     * @summary Create Extension
+     * @request POST:/api/v2/extensions/{baseId}
+     * @response `200` `any` OK
+     */
+    create: (baseId: IdType, data: object, params: RequestParams = {}) =>
+      this.request<any, any>({
+        path: `/api/v2/extensions/${baseId}`,
+        method: 'POST',
+        body: data,
+        type: ContentType.Json,
+        format: 'json',
+        ...params,
+      }),
+
+    /**
+     * @description Get extension details
+     *
+     * @tags Extensions
+     * @name Read
+     * @summary Get Extension
+     * @request GET:/api/v2/extensions/{extensionId}
+     * @response `200` `object` OK
+     */
+    read: (extensionId: IdType, params: RequestParams = {}) =>
+      this.request<object, any>({
+        path: `/api/v2/extensions/${extensionId}`,
+        method: 'GET',
+        format: 'json',
+        ...params,
+      }),
+
+    /**
+     * @description Update extension details
+     *
+     * @tags Extensions
+     * @name Update
+     * @summary Update Extension
+     * @request PATCH:/api/v2/extensions/{extensionId}
+     * @response `200` `any` OK
+     */
+    update: (extensionId: IdType, data: object, params: RequestParams = {}) =>
+      this.request<any, any>({
+        path: `/api/v2/extensions/${extensionId}`,
+        method: 'PATCH',
+        body: data,
+        type: ContentType.Json,
+        format: 'json',
+        ...params,
+      }),
+
+    /**
+     * @description Delete extension
+     *
+     * @tags Extensions
+     * @name Delete
+     * @summary Delete Extension
+     * @request DELETE:/api/v2/extensions/{extensionId}
+     * @response `200` `any` OK
+     */
+    delete: (extensionId: IdType, params: RequestParams = {}) =>
+      this.request<any, any>({
+        path: `/api/v2/extensions/${extensionId}`,
+        method: 'DELETE',
         format: 'json',
         ...params,
       }),

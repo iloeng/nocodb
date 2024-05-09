@@ -2,6 +2,7 @@ import jsep from 'jsep';
 import {
   FormulaDataTypes,
   jsepCurlyHook,
+  RelationTypes,
   UITypes,
   validateDateWithUnknownFormat,
   validateFormulaAndExtractTreeWithType,
@@ -16,10 +17,11 @@ import type { BaseModelSqlv2 } from '~/db/BaseModelSqlv2';
 import type Column from '~/models/Column';
 import Model from '~/models/Model';
 import NocoCache from '~/cache/NocoCache';
-import { CacheGetType, CacheScope } from '~/utils/globals';
+import { CacheScope } from '~/utils/globals';
 import { convertDateFormatForConcat } from '~/helpers/formulaFnHelper';
 import FormulaColumn from '~/models/FormulaColumn';
 import { Base, BaseUser } from '~/models';
+import { getRefColumnIfAlias } from '~/helpers';
 
 const logger = new Logger('FormulaQueryBuilderv2');
 
@@ -140,14 +142,14 @@ async function _formulaQueryBuilder(
         aliasToColumn[col.id] = async (): Promise<any> => {
           let aliasCount = 0;
           let selectQb;
-          let isMany = false;
+          let isArray = false;
           const alias = `__nc_formula${aliasCount++}`;
           const lookup = await col.getColOptions<LookupColumn>();
           {
             const relationCol = await lookup.getRelationColumn();
             const relation =
               await relationCol.getColOptions<LinkToAnotherRecordColumn>();
-            // if (relation.type !== 'bt') continue;
+            // if (relation.type !== RelationTypes.BELONGS_TO) continue;
 
             const childColumn = await relation.getChildColumn();
             const parentColumn = await relation.getParentColumn();
@@ -155,12 +157,22 @@ async function _formulaQueryBuilder(
             await childModel.getColumns();
             const parentModel = await parentColumn.getModel();
             await parentModel.getColumns();
-            switch (relation.type) {
-              case 'bt':
+
+            let relationType = relation.type;
+
+            if (relationType === RelationTypes.ONE_TO_ONE) {
+              relationType = relationCol.meta?.bt
+                ? RelationTypes.BELONGS_TO
+                : RelationTypes.HAS_MANY;
+            }
+
+            switch (relationType) {
+              case RelationTypes.BELONGS_TO:
                 selectQb = knex(
-                  `${baseModelSqlv2.getTnPath(
-                    parentModel.table_name,
-                  )} as ${alias}`,
+                  knex.raw(`?? as ??`, [
+                    baseModelSqlv2.getTnPath(parentModel.table_name),
+                    alias,
+                  ]),
                 ).where(
                   `${alias}.${parentColumn.column_name}`,
                   knex.raw(`??`, [
@@ -171,12 +183,13 @@ async function _formulaQueryBuilder(
                   ]),
                 );
                 break;
-              case 'hm':
-                isMany = true;
+              case RelationTypes.HAS_MANY:
+                isArray = relation.type !== RelationTypes.ONE_TO_ONE;
                 selectQb = knex(
-                  `${baseModelSqlv2.getTnPath(
-                    childModel.table_name,
-                  )} as ${alias}`,
+                  knex.raw(`?? as ??`, [
+                    baseModelSqlv2.getTnPath(childModel.table_name),
+                    alias,
+                  ]),
                 ).where(
                   `${alias}.${childColumn.column_name}`,
                   knex.raw(`??`, [
@@ -187,23 +200,25 @@ async function _formulaQueryBuilder(
                   ]),
                 );
                 break;
-              case 'mm':
+              case RelationTypes.MANY_TO_MANY:
                 {
-                  isMany = true;
+                  isArray = true;
                   const mmModel = await relation.getMMModel();
                   const mmParentColumn = await relation.getMMParentColumn();
                   const mmChildColumn = await relation.getMMChildColumn();
 
                   const assocAlias = `__nc${aliasCount++}`;
                   selectQb = knex(
-                    `${baseModelSqlv2.getTnPath(
-                      parentModel.table_name,
-                    )} as ${alias}`,
+                    knex.raw(`?? as ??`, [
+                      baseModelSqlv2.getTnPath(parentModel.table_name),
+                      alias,
+                    ]),
                   )
                     .join(
-                      `${baseModelSqlv2.getTnPath(
-                        mmModel.table_name,
-                      )} as ${assocAlias}`,
+                      knex.raw(`?? as ??`, [
+                        baseModelSqlv2.getTnPath(mmModel.table_name),
+                        assocAlias,
+                      ]),
                       `${assocAlias}.${mmParentColumn.column_name}`,
                       `${alias}.${parentColumn.column_name}`,
                     )
@@ -231,7 +246,7 @@ async function _formulaQueryBuilder(
                 await relationCol.getColOptions<LinkToAnotherRecordColumn>();
               // if any of the relation in nested lookup is
               // not belongs to then ignore the sort option
-              // if (relation.type !== 'bt') continue;
+              // if (relation.type !== RelationTypes.BELONGS_TO) continue;
 
               const childColumn = await relation.getChildColumn();
               const parentColumn = await relation.getParentColumn();
@@ -240,32 +255,42 @@ async function _formulaQueryBuilder(
               const parentModel = await parentColumn.getModel();
               await parentModel.getColumns();
 
-              switch (relation.type) {
-                case 'bt':
+              let relationType = relation.type;
+
+              if (relationType === RelationTypes.ONE_TO_ONE) {
+                relationType = relationCol.meta?.bt
+                  ? RelationTypes.BELONGS_TO
+                  : RelationTypes.HAS_MANY;
+              }
+
+              switch (relationType) {
+                case RelationTypes.BELONGS_TO:
                   {
                     selectQb.join(
-                      `${baseModelSqlv2.getTnPath(
-                        parentModel.table_name,
-                      )} as ${nestedAlias}`,
+                      knex.raw(`?? as ??`, [
+                        baseModelSqlv2.getTnPath(parentModel.table_name),
+                        nestedAlias,
+                      ]),
                       `${prevAlias}.${childColumn.column_name}`,
                       `${nestedAlias}.${parentColumn.column_name}`,
                     );
                   }
                   break;
-                case 'hm':
+                case RelationTypes.HAS_MANY:
                   {
-                    isMany = true;
+                    isArray = relation.type !== RelationTypes.ONE_TO_ONE;
                     selectQb.join(
-                      `${baseModelSqlv2.getTnPath(
-                        childModel.table_name,
-                      )} as ${nestedAlias}`,
+                      knex.raw(`?? as ??`, [
+                        baseModelSqlv2.getTnPath(childModel.table_name),
+                        nestedAlias,
+                      ]),
                       `${prevAlias}.${parentColumn.column_name}`,
                       `${nestedAlias}.${childColumn.column_name}`,
                     );
                   }
                   break;
-                case 'mm': {
-                  isMany = true;
+                case RelationTypes.MANY_TO_MANY: {
+                  isArray = true;
                   const mmModel = await relation.getMMModel();
                   const mmParentColumn = await relation.getMMParentColumn();
                   const mmChildColumn = await relation.getMMChildColumn();
@@ -274,16 +299,18 @@ async function _formulaQueryBuilder(
 
                   selectQb
                     .join(
-                      `${baseModelSqlv2.getTnPath(
-                        mmModel.table_name,
-                      )} as ${assocAlias}`,
+                      knex.raw(`?? as ??`, [
+                        baseModelSqlv2.getTnPath(mmModel.table_name),
+                        assocAlias,
+                      ]),
                       `${assocAlias}.${mmChildColumn.column_name}`,
                       `${prevAlias}.${childColumn.column_name}`,
                     )
                     .join(
-                      `${baseModelSqlv2.getTnPath(
-                        parentModel.table_name,
-                      )} as ${nestedAlias}`,
+                      knex.raw(`?? as ??`, [
+                        baseModelSqlv2.getTnPath(parentModel.table_name),
+                        nestedAlias,
+                      ]),
                       `${nestedAlias}.${parentColumn.column_name}`,
                       `${assocAlias}.${mmParentColumn.column_name}`,
                     );
@@ -315,7 +342,7 @@ async function _formulaQueryBuilder(
                   ).builder;
                   // selectQb.select(builder);
 
-                  if (isMany) {
+                  if (isArray) {
                     const qb = selectQb;
                     selectQb = (fn) =>
                       knex
@@ -337,7 +364,7 @@ async function _formulaQueryBuilder(
                   const nestedAlias = `__nc_formula${aliasCount++}`;
                   const relation =
                     await lookupColumn.getColOptions<LinkToAnotherRecordColumn>();
-                  // if (relation.type !== 'bt') continue;
+                  // if (relation.type !== RelationTypes.BELONGS_TO) continue;
 
                   const colOptions =
                     (await lookupColumn.getColOptions()) as LinkToAnotherRecordColumn;
@@ -348,13 +375,23 @@ async function _formulaQueryBuilder(
                   const parentModel = await parentColumn.getModel();
                   await parentModel.getColumns();
                   let cn;
-                  switch (relation.type) {
-                    case 'bt':
+
+                  let relationType = relation.type;
+
+                  if (relationType === RelationTypes.ONE_TO_ONE) {
+                    relationType = relationCol.meta?.bt
+                      ? RelationTypes.BELONGS_TO
+                      : RelationTypes.HAS_MANY;
+                  }
+
+                  switch (relationType) {
+                    case RelationTypes.BELONGS_TO:
                       {
                         selectQb.join(
-                          `${baseModelSqlv2.getTnPath(
-                            parentModel.table_name,
-                          )} as ${nestedAlias}`,
+                          knex.raw(`?? as ??`, [
+                            baseModelSqlv2.getTnPath(parentModel.table_name),
+                            nestedAlias,
+                          ]),
                           `${alias}.${childColumn.column_name}`,
                           `${nestedAlias}.${parentColumn.column_name}`,
                         );
@@ -364,13 +401,14 @@ async function _formulaQueryBuilder(
                         ]);
                       }
                       break;
-                    case 'hm':
+                    case RelationTypes.HAS_MANY:
                       {
-                        isMany = true;
+                        isArray = relation.type !== RelationTypes.ONE_TO_ONE;
                         selectQb.join(
-                          `${baseModelSqlv2.getTnPath(
-                            childModel.table_name,
-                          )} as ${nestedAlias}`,
+                          knex.raw(`?? as ??`, [
+                            baseModelSqlv2.getTnPath(childModel.table_name),
+                            nestedAlias,
+                          ]),
                           `${alias}.${parentColumn.column_name}`,
                           `${nestedAlias}.${childColumn.column_name}`,
                         );
@@ -380,9 +418,9 @@ async function _formulaQueryBuilder(
                         ]);
                       }
                       break;
-                    case 'mm':
+                    case RelationTypes.MANY_TO_MANY:
                       {
-                        isMany = true;
+                        isArray = true;
                         const mmModel = await relation.getMMModel();
                         const mmParentColumn =
                           await relation.getMMParentColumn();
@@ -392,16 +430,18 @@ async function _formulaQueryBuilder(
 
                         selectQb
                           .join(
-                            `${baseModelSqlv2.getTnPath(
-                              mmModel.table_name,
-                            )} as ${assocAlias}`,
+                            knex.raw(`?? as ??`, [
+                              baseModelSqlv2.getTnPath(mmModel.table_name),
+                              assocAlias,
+                            ]),
                             `${assocAlias}.${mmChildColumn.column_name}`,
                             `${alias}.${childColumn.column_name}`,
                           )
                           .join(
-                            `${baseModelSqlv2.getTnPath(
-                              parentModel.table_name,
-                            )} as ${nestedAlias}`,
+                            knex.raw(`?? as ??`, [
+                              baseModelSqlv2.getTnPath(parentModel.table_name),
+                              nestedAlias,
+                            ]),
                             `${nestedAlias}.${parentColumn.column_name}`,
                             `${assocAlias}.${mmParentColumn.column_name}`,
                           );
@@ -413,14 +453,15 @@ async function _formulaQueryBuilder(
                   }
 
                   selectQb.join(
-                    `${baseModelSqlv2.getTnPath(
-                      parentModel.table_name,
-                    )} as ${nestedAlias}`,
+                    knex.raw(`?? as ??`, [
+                      baseModelSqlv2.getTnPath(parentModel.table_name),
+                      nestedAlias,
+                    ]),
                     `${nestedAlias}.${parentColumn.column_name}`,
                     `${prevAlias}.${childColumn.column_name}`,
                   );
 
-                  if (isMany) {
+                  if (isArray) {
                     const qb = selectQb;
                     selectQb = (fn) =>
                       knex
@@ -450,7 +491,7 @@ async function _formulaQueryBuilder(
                     aliasToColumn,
                     formulaOption.getParsedTree(),
                   );
-                  if (isMany) {
+                  if (isArray) {
                     const qb = selectQb;
                     selectQb = (fn) =>
                       knex
@@ -469,7 +510,7 @@ async function _formulaQueryBuilder(
                 break;
               default:
                 {
-                  if (isMany) {
+                  if (isArray) {
                     const qb = selectQb;
                     selectQb = (fn) =>
                       knex
@@ -515,7 +556,7 @@ async function _formulaQueryBuilder(
         aliasToColumn[col.id] = async (): Promise<any> => {
           const alias = `__nc_formula_ll`;
           const relation = await col.getColOptions<LinkToAnotherRecordColumn>();
-          // if (relation.type !== 'bt') continue;
+          // if (relation.type !== RelationTypes.BELONGS_TO) continue;
 
           const colOptions =
             (await col.getColOptions()) as LinkToAnotherRecordColumn;
@@ -526,8 +567,16 @@ async function _formulaQueryBuilder(
           const parentModel = await parentColumn.getModel();
           await parentModel.getColumns();
 
+          let relationType = relation.type;
+
+          if (relationType === RelationTypes.ONE_TO_ONE) {
+            relationType = col.meta?.bt
+              ? RelationTypes.BELONGS_TO
+              : RelationTypes.HAS_MANY;
+          }
+
           let selectQb;
-          if (relation.type === 'bt') {
+          if (relationType === RelationTypes.BELONGS_TO) {
             selectQb = knex(baseModelSqlv2.getTnPath(parentModel.table_name))
               .select(parentModel?.displayValue?.column_name)
               .where(
@@ -541,7 +590,7 @@ async function _formulaQueryBuilder(
                   }.${childColumn.column_name}`,
                 ]),
               );
-          } else if (relation.type == 'hm') {
+          } else if (relationType == RelationTypes.HAS_MANY) {
             const qb = knex(baseModelSqlv2.getTnPath(childModel.table_name))
               // .select(knex.raw(`GROUP_CONCAT(??)`, [childModel?.pv?.title]))
               .where(
@@ -568,7 +617,7 @@ async function _formulaQueryBuilder(
                 .wrap('(', ')');
 
             // getAggregateFn();
-          } else if (relation.type == 'mm') {
+          } else if (relationType == RelationTypes.MANY_TO_MANY) {
             // todo:
             // const qb = knex(childModel.title)
             //   // .select(knex.raw(`GROUP_CONCAT(??)`, [childModel?.pv?.title]))
@@ -597,7 +646,10 @@ async function _formulaQueryBuilder(
             const mmChildColumn = await relation.getMMChildColumn();
 
             const qb = knex(
-              `${baseModelSqlv2.getTnPath(parentModel.table_name)} as ${alias}`,
+              knex.raw(`?? as ??`, [
+                baseModelSqlv2.getTnPath(parentModel.table_name),
+                alias,
+              ]),
             )
               .join(
                 `${baseModelSqlv2.getTnPath(mmModel.table_name)}`,
@@ -637,52 +689,65 @@ async function _formulaQueryBuilder(
             };
         };
         break;
+      case UITypes.CreatedTime:
+      case UITypes.LastModifiedTime:
       case UITypes.DateTime:
-        if (knex.clientType().startsWith('mysql')) {
-          aliasToColumn[col.id] = async (): Promise<any> => {
-            return {
-              // convert from DB timezone to UTC
-              builder: knex.raw(
-                `CONVERT_TZ(??, @@GLOBAL.time_zone, '+00:00')`,
-                [col.column_name],
-              ),
+        {
+          const refCol = await getRefColumnIfAlias(col);
+
+          if (refCol.id in aliasToColumn) {
+            aliasToColumn[col.id] = aliasToColumn[refCol.id];
+            break;
+          }
+          if (knex.clientType().startsWith('mysql')) {
+            aliasToColumn[col.id] = async (): Promise<any> => {
+              return {
+                // convert from DB timezone to UTC
+                builder: knex.raw(
+                  `CONVERT_TZ(??, @@GLOBAL.time_zone, '+00:00')`,
+                  [refCol.column_name],
+                ),
+              };
             };
-          };
-        } else if (
-          knex.clientType() === 'pg' &&
-          col.dt !== 'timestamp with time zone' &&
-          col.dt !== 'timestamptz'
-        ) {
-          aliasToColumn[col.id] = async (): Promise<any> => {
-            return {
-              // convert from DB timezone to UTC
-              builder: knex
-                .raw(
-                  `?? AT TIME ZONE CURRENT_SETTING('timezone') AT TIME ZONE 'UTC'`,
-                  [col.column_name],
-                )
-                .wrap('(', ')'),
+          } else if (
+            knex.clientType() === 'pg' &&
+            refCol.dt !== 'timestamp with time zone' &&
+            refCol.dt !== 'timestamptz'
+          ) {
+            aliasToColumn[col.id] = async (): Promise<any> => {
+              return {
+                // convert from DB timezone to UTC
+                builder: knex
+                  .raw(
+                    `?? AT TIME ZONE CURRENT_SETTING('timezone') AT TIME ZONE 'UTC'`,
+                    [refCol.column_name],
+                  )
+                  .wrap('(', ')'),
+              };
             };
-          };
-        } else if (
-          knex.clientType() === 'mssql' &&
-          col.dt !== 'datetimeoffset'
-        ) {
-          // convert from DB timezone to UTC
-          aliasToColumn[col.id] = async (): Promise<any> => {
-            return {
-              builder: knex.raw(
-                `CONVERT(DATETIMEOFFSET, ?? AT TIME ZONE 'UTC')`,
-                [col.column_name],
-              ),
+          } else if (
+            knex.clientType() === 'mssql' &&
+            refCol.dt !== 'datetimeoffset'
+          ) {
+            // convert from DB timezone to UTC
+            aliasToColumn[col.id] = async (): Promise<any> => {
+              return {
+                builder: knex.raw(
+                  `CONVERT(DATETIMEOFFSET, ?? AT TIME ZONE 'UTC')`,
+                  [refCol.column_name],
+                ),
+              };
             };
-          };
-        } else {
-          aliasToColumn[col.id] = () =>
-            Promise.resolve({ builder: col.column_name });
+          } else {
+            aliasToColumn[col.id] = () =>
+              Promise.resolve({ builder: refCol.column_name });
+          }
+          aliasToColumn[refCol.id] = aliasToColumn[col.id];
         }
         break;
       case UITypes.User:
+      case UITypes.CreatedBy:
+      case UITypes.LastModifiedBy:
         {
           const base = await Base.get(model.base_id);
           const baseUsers = await BaseUser.getUsersList({
@@ -716,6 +781,23 @@ async function _formulaQueryBuilder(
       arg.fnName = pt.callee.name.toUpperCase();
       arg.argsCount = pt.arguments?.length;
     });
+
+    // if cast is string, then wrap with STRING() function
+    if (pt.cast === FormulaDataTypes.STRING) {
+      return fn(
+        {
+          type: 'CallExpression',
+          arguments: [{ ...pt, cast: null }],
+          callee: {
+            type: 'Identifier',
+            name: 'STRING',
+          },
+        },
+        a,
+        prevBinaryOp,
+      );
+    }
+
     if (pt.type === 'CallExpression') {
       switch (pt.callee.name.toUpperCase()) {
         case 'ADD':
@@ -751,6 +833,19 @@ async function _formulaQueryBuilder(
             } else {
               return fn(pt.arguments[0], a, prevBinaryOp);
             }
+          } else if (knex.clientType() === 'databricks') {
+            const res = await mapFunctionName({
+              pt,
+              knex,
+              alias,
+              a,
+              aliasToCol: aliasToColumn,
+              fn,
+              colAlias,
+              prevBinaryOp,
+              model,
+            });
+            if (res) return res;
           }
           break;
         case 'URL':
@@ -839,6 +934,19 @@ async function _formulaQueryBuilder(
       if (typeof builder === 'function') {
         return { builder: knex.raw(`??${colAlias}`, builder(pt.fnName)) };
       }
+
+      if (
+        knex.clientType() === 'databricks' &&
+        builder.toQuery().endsWith(')')
+      ) {
+        // limit 1 for subquery
+        return {
+          builder: knex.raw(
+            `${builder.toQuery().replace(/\)$/, '')} LIMIT 1)${colAlias}`,
+          ),
+        };
+      }
+
       return { builder: knex.raw(`??${colAlias}`, [builder || pt.name]) };
     } else if (pt.type === 'BinaryExpression') {
       // treat `&` as shortcut for concat
@@ -875,6 +983,23 @@ async function _formulaQueryBuilder(
 
       // if operator is == or !=, then handle comparison with BLANK which should accept NULL and empty string
       if (pt.operator === '==' || pt.operator === '!=') {
+        for (const operand of ['left', 'right']) {
+          if (
+            pt[operand].dataType === FormulaDataTypes.BOOLEAN &&
+            pt[operand === 'left' ? 'right' : 'left'].dataType ===
+              FormulaDataTypes.NUMERIC
+          ) {
+            pt[operand === 'left' ? 'right' : 'left'] = {
+              type: 'CallExpression',
+              arguments: [pt[operand === 'left' ? 'right' : 'left']],
+              callee: {
+                type: 'Identifier',
+                name: 'BOOLEAN',
+              },
+              dataType: FormulaDataTypes.BOOLEAN,
+            };
+          }
+        }
         if (pt.left.callee?.name !== pt.right.callee?.name) {
           // if left/right is BLANK, accept both NULL and empty string
           for (const operand of ['left', 'right']) {
@@ -1138,7 +1263,7 @@ export default async function formulaQueryBuilderv2(
       const formula = await column.getColOptions<FormulaColumn>();
       // clean the previous formula error if the formula works this time
       if (formula.error) {
-        await FormulaColumn.update(formula.id, {
+        await FormulaColumn.update(column.id, {
           error: null,
         });
       }
@@ -1148,19 +1273,14 @@ export default async function formulaQueryBuilderv2(
 
     console.error(e);
     if (column) {
-      const formula = await column.getColOptions<FormulaColumn>();
       // add formula error to show in UI
-      await FormulaColumn.update(formula.id, {
+      await FormulaColumn.update(column.id, {
         error: e.message,
       });
       // update cache to reflect the error in UI
-      const key = `${CacheScope.COL_FORMULA}:${column.id}`;
-      let o = await NocoCache.get(key, CacheGetType.TYPE_OBJECT);
-      if (o) {
-        o = { ...o, error: e.message };
-        // set cache
-        await NocoCache.set(key, o);
-      }
+      await NocoCache.update(`${CacheScope.COL_FORMULA}:${column.id}`, {
+        error: e.message,
+      });
     }
     throw new Error(`Formula error: ${e.message}`);
   }

@@ -1,11 +1,12 @@
 import path from 'path';
 import { Injectable } from '@nestjs/common';
 import { nanoid } from 'nanoid';
-import { ErrorMessages, UITypes, ViewTypes } from 'nocodb-sdk';
+import { populateUniqueFileName, UITypes, ViewTypes } from 'nocodb-sdk';
 import slash from 'slash';
 import { nocoExecute } from 'nc-help';
 
 import type { LinkToAnotherRecordColumn } from '~/models';
+import { Column, Model, Source, View } from '~/models';
 import { NcError } from '~/helpers/catchError';
 import getAst from '~/helpers/getAst';
 import NcPluginMgrv2 from '~/helpers/NcPluginMgrv2';
@@ -13,7 +14,6 @@ import { PagedResponseImpl } from '~/helpers/PagedResponse';
 import { getColumnByIdOrName } from '~/modules/datas/helpers';
 import NcConnectionMgrv2 from '~/utils/common/NcConnectionMgrv2';
 import { mimeIcons } from '~/utils/mimeTypes';
-import { Column, Model, Source, View } from '~/models';
 import { utf8ify } from '~/helpers/stringHelpers';
 
 // todo: move to utils
@@ -31,18 +31,19 @@ export class PublicDatasService {
     const { sharedViewUuid, password, query = {} } = param;
     const view = await View.getByUUID(sharedViewUuid);
 
-    if (!view) NcError.notFound('Not found');
+    if (!view) NcError.viewNotFound(sharedViewUuid);
     if (
       view.type !== ViewTypes.GRID &&
       view.type !== ViewTypes.KANBAN &&
       view.type !== ViewTypes.GALLERY &&
-      view.type !== ViewTypes.MAP
+      view.type !== ViewTypes.MAP &&
+      view.type !== ViewTypes.CALENDAR
     ) {
       NcError.notFound('Not found');
     }
 
     if (view.password && view.password !== password) {
-      return NcError.forbidden(ErrorMessages.INVALID_SHARED_VIEW_PASSWORD);
+      return NcError.invalidSharedViewPassword();
     }
 
     const model = await Model.getByIdOrName({
@@ -98,7 +99,7 @@ export class PublicDatasService {
   }) {
     const view = await View.getByUUID(param.sharedViewUuid);
 
-    if (!view) NcError.notFound('Not found');
+    if (!view) NcError.viewNotFound(param.sharedViewUuid);
 
     if (
       view.type !== ViewTypes.GRID &&
@@ -109,7 +110,7 @@ export class PublicDatasService {
     }
 
     if (view.password && view.password !== param.password) {
-      return NcError.forbidden(ErrorMessages.INVALID_SHARED_VIEW_PASSWORD);
+      return NcError.invalidSharedViewPassword();
     }
 
     const model = await Model.getByIdOrName({
@@ -195,14 +196,14 @@ export class PublicDatasService {
   }) {
     const view = await View.getByUUID(param.sharedViewUuid);
 
-    if (!view) NcError.notFound('Not found');
+    if (!view) NcError.viewNotFound(param.sharedViewUuid);
 
     if (view.type !== ViewTypes.GRID) {
       NcError.notFound('Not found');
     }
 
     if (view.password && view.password !== param.password) {
-      return NcError.forbidden(ErrorMessages.INVALID_SHARED_VIEW_PASSWORD);
+      return NcError.invalidSharedViewPassword();
     }
 
     const model = await Model.getByIdOrName({
@@ -255,11 +256,11 @@ export class PublicDatasService {
   }) {
     const view = await View.getByUUID(param.sharedViewUuid);
 
-    if (!view) NcError.notFound();
+    if (!view) NcError.viewNotFound(param.sharedViewUuid);
     if (view.type !== ViewTypes.FORM) NcError.notFound();
 
     if (view.password && view.password !== param.password) {
-      return NcError.forbidden(ErrorMessages.INVALID_SHARED_VIEW_PASSWORD);
+      return NcError.invalidSharedViewPassword();
     }
 
     const model = await Model.getByIdOrName({
@@ -320,7 +321,13 @@ export class PublicDatasService {
         fields[fieldName].uidt === UITypes.Attachment
       ) {
         attachments[fieldName] = attachments[fieldName] || [];
-        const originalName = utf8ify(file.originalname);
+        let originalName = utf8ify(file.originalname);
+
+        originalName = populateUniqueFileName(
+          originalName,
+          attachments[fieldName].map((att) => att?.title),
+        );
+
         const fileName = `${nanoid(18)}${path.extname(originalName)}`;
 
         const url = await storageAdapter.fileCreate(
@@ -347,6 +354,65 @@ export class PublicDatasService {
       }
     }
 
+    // filter the uploadByUrl attachments
+    const uploadByUrlAttachments = [];
+    for (const [column, data] of Object.entries(insertObject)) {
+      if (fields[column].uidt === UITypes.Attachment && Array.isArray(data)) {
+        data.forEach((file, uploadIndex) => {
+          if (file?.url && !file?.file) {
+            uploadByUrlAttachments.push({
+              ...file,
+              fieldName: column,
+              uploadIndex,
+            });
+          }
+        });
+      }
+    }
+
+    for (const file of uploadByUrlAttachments) {
+      const filePath = sanitizeUrlPath([
+        'noco',
+        base.title,
+        model.title,
+        file.fieldName,
+      ]);
+
+      attachments[file.fieldName] = attachments[file.fieldName] || [];
+
+      const fileName = `${nanoid(18)}${path.extname(
+        file?.fileName || file.url.split('/').pop(),
+      )}`;
+
+      const attachmentUrl: string | null = await storageAdapter.fileCreateByUrl(
+        slash(path.join('nc', 'uploads', ...filePath, fileName)),
+        file.url,
+      );
+
+      let attachmentPath: string | undefined;
+
+      // if `attachmentUrl` is null, then it is local attachment
+      if (!attachmentUrl) {
+        // then store the attachment path only
+        // url will be constructed in `useAttachmentCell`
+        attachmentPath = `download/${filePath.join('/')}/${fileName}`;
+      }
+
+      // add attachement in uploaded order
+      attachments[file.fieldName].splice(
+        file.uploadIndex ?? attachments[file.fieldName].length,
+        0,
+        {
+          ...(attachmentUrl ? { url: attachmentUrl } : {}),
+          ...(attachmentPath ? { path: attachmentPath } : {}),
+          title: file.fileName,
+          mimetype: file.mimetype,
+          size: file.size,
+          icon: mimeIcons[path.extname(fileName).slice(1)] || undefined,
+        },
+      );
+    }
+
     for (const [column, data] of Object.entries(attachments)) {
       insertObject[column] = JSON.stringify(data);
     }
@@ -362,14 +428,14 @@ export class PublicDatasService {
   }) {
     const view = await View.getByUUID(param.sharedViewUuid);
 
-    if (!view) NcError.notFound('Not found');
+    if (!view) NcError.viewNotFound(param.sharedViewUuid);
 
     if (view.type !== ViewTypes.FORM && view.type !== ViewTypes.GALLERY) {
       NcError.notFound('Not found');
     }
 
     if (view.password && view.password !== param.password) {
-      NcError.forbidden(ErrorMessages.INVALID_SHARED_VIEW_PASSWORD);
+      NcError.invalidSharedViewPassword();
     }
 
     const column = await Column.get({ colId: param.columnId });
@@ -420,17 +486,18 @@ export class PublicDatasService {
   }) {
     const view = await View.getByUUID(param.sharedViewUuid);
 
-    if (!view) NcError.notFound('Not found');
+    if (!view) NcError.viewNotFound(param.sharedViewUuid);
     if (
       view.type !== ViewTypes.GRID &&
       view.type !== ViewTypes.KANBAN &&
-      view.type !== ViewTypes.GALLERY
+      view.type !== ViewTypes.GALLERY &&
+      view.type !== ViewTypes.CALENDAR
     ) {
       NcError.notFound('Not found');
     }
 
     if (view.password && view.password !== param.password) {
-      NcError.forbidden(ErrorMessages.INVALID_SHARED_VIEW_PASSWORD);
+      NcError.invalidSharedViewPassword();
     }
 
     const column = await getColumnByIdOrName(
@@ -494,17 +561,18 @@ export class PublicDatasService {
   }) {
     const view = await View.getByUUID(param.sharedViewUuid);
 
-    if (!view) NcError.notFound('Not found');
+    if (!view) NcError.viewNotFound(param.sharedViewUuid);
     if (
       view.type !== ViewTypes.GRID &&
       view.type !== ViewTypes.KANBAN &&
-      view.type !== ViewTypes.GALLERY
+      view.type !== ViewTypes.GALLERY &&
+      view.type !== ViewTypes.CALENDAR
     ) {
       NcError.notFound('Not found');
     }
 
     if (view.password && view.password !== param.password) {
-      NcError.forbidden(ErrorMessages.INVALID_SHARED_VIEW_PASSWORD);
+      NcError.invalidSharedViewPassword();
     }
 
     const column = await getColumnByIdOrName(

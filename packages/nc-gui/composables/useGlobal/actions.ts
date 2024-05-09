@@ -1,7 +1,6 @@
 import { getActivePinia } from 'pinia'
 import type { Actions, AppInfo, State } from './types'
 import type { NcProjectType } from '#imports'
-import { message, navigateTo, useNuxtApp } from '#imports'
 
 export function useGlobalActions(state: State): Actions {
   const setIsMobileMode = (isMobileMode: boolean) => {
@@ -29,12 +28,15 @@ export function useGlobalActions(state: State): Actions {
     }
   }
 
-  /** Sign in by setting the token in localStorage */
-  const signIn: Actions['signIn'] = async (newToken) => {
+  /** Sign in by setting the token in localStorage
+   * keepProps - is for keeping any existing role info if user id is same as previous user
+   * */
+  const signIn: Actions['signIn'] = async (newToken, keepProps = false) => {
     state.token.value = newToken
 
     if (state.jwtPayload.value) {
       state.user.value = {
+        ...(keepProps && state.user.value?.id === state.jwtPayload.value.id ? state.user.value || {} : {}),
         id: state.jwtPayload.value.id,
         email: state.jwtPayload.value.email,
         firstname: state.jwtPayload.value.firstname,
@@ -57,7 +59,7 @@ export function useGlobalActions(state: State): Actions {
         })
         .then((response) => {
           if (response.data?.token) {
-            signIn(response.data.token)
+            signIn(response.data.token, true)
           }
         })
         .catch(async () => {
@@ -139,6 +141,11 @@ export function useGlobalActions(state: State): Actions {
   }
 
   const getBaseUrl = (workspaceId: string) => {
+    // if baseUrl is set in appInfo, use it
+    if (state.appInfo.value.baseUrl) {
+      return state.appInfo.value.baseUrl
+    }
+
     if (state.appInfo.value.baseHostName && location.hostname !== `${workspaceId}.${state.appInfo.value.baseHostName}`) {
       return `https://${workspaceId}.${state.appInfo.value.baseHostName}`
     }
@@ -149,5 +156,20 @@ export function useGlobalActions(state: State): Actions {
     return undefined
   }
 
-  return { signIn, signOut, refreshToken, loadAppInfo, setIsMobileMode, navigateToProject, getBaseUrl, ncNavigateTo, getMainUrl }
+  const setGridViewPageSize = (pageSize: number) => {
+    state.gridViewPageSize.value = pageSize
+  }
+
+  return {
+    signIn,
+    signOut,
+    refreshToken,
+    loadAppInfo,
+    setIsMobileMode,
+    navigateToProject,
+    getBaseUrl,
+    ncNavigateTo,
+    getMainUrl,
+    setGridViewPageSize,
+  }
 }

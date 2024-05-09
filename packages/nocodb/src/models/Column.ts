@@ -28,7 +28,11 @@ import {
   MetaTable,
 } from '~/utils/globals';
 import NocoCache from '~/cache/NocoCache';
-import { parseMetaProp, stringifyMetaProp } from '~/utils/modelUtils';
+import {
+  parseMetaProp,
+  prepareForDb,
+  prepareForResponse,
+} from '~/utils/modelUtils';
 import { getFormulasReferredTheColumn } from '~/helpers/formulaHelpers';
 
 const selectColors = [
@@ -153,6 +157,13 @@ export default class Column<T = any> implements ColumnType {
     if (insertObj.meta && typeof insertObj.meta === 'object') {
       insertObj.meta = JSON.stringify(insertObj.meta);
     }
+
+    insertObj.order =
+      column.order ??
+      (await ncMeta.metaGetNextOrder(MetaTable.COLUMNS, {
+        fk_model_id: column.fk_model_id,
+      }));
+
     if (column.validate) {
       if (typeof column.validate === 'string')
         insertObj.validate = column.validate;
@@ -190,37 +201,22 @@ export default class Column<T = any> implements ColumnType {
       {
         fk_column_id: row.id,
         fk_model_id: column.fk_model_id,
-        show: !column.view_id,
+        column_show: {
+          show:
+            column.uidt === UITypes.LinkToAnotherRecord ||
+            (column.uidt === UITypes.Links &&
+              column.type === 'mm' &&
+              !column.view_id)
+              ? false
+              : !column.view_id,
+          view_id: column.view_id,
+        },
         column_order: column.column_order,
       },
       ncMeta,
     );
 
-    await NocoCache.delAll(
-      CacheScope.SINGLE_QUERY,
-      `${column.fk_model_id}:default:*`,
-    );
-
-    if (column.view_id) {
-      const viewColId = await View.getViewColumnId(
-        {
-          viewId: column.view_id,
-          colId: row.id,
-        },
-        ncMeta,
-      );
-
-      if (viewColId) {
-        await View.updateColumn(
-          column.view_id,
-          viewColId,
-          {
-            show: true,
-          },
-          ncMeta,
-        );
-      }
-    }
+    await View.clearSingleQueryCache(column.fk_model_id, null, ncMeta);
 
     return col;
   }
@@ -487,23 +483,13 @@ export default class Column<T = any> implements ColumnType {
     return this.model;
   }
 
-  public static async clearList({ fk_model_id }) {
-    await NocoCache.deepDel(
-      CacheScope.COLUMN,
-      `${CacheScope.COLUMN}:${fk_model_id}:list`,
-      CacheDelDirection.PARENT_TO_CHILD,
-    );
-  }
-
-  public static async clear({ id }) {
-    await NocoCache.delAll(CacheScope.COLUMN, `*${id}*`);
-  }
-
   public static async list(
     {
       fk_model_id,
+      fk_default_view_id,
     }: {
       fk_model_id: string;
+      fk_default_view_id?: string;
     },
     ncMeta = Noco.ncMeta,
   ): Promise<Column[]> {
@@ -512,6 +498,16 @@ export default class Column<T = any> implements ColumnType {
     ]);
     let { list: columnsList } = cachedList;
     const { isNoneList } = cachedList;
+
+    const defaultViewColumns = fk_default_view_id
+      ? await View.getColumns(fk_default_view_id)
+      : [];
+
+    const defaultViewColumnOrderMap = defaultViewColumns.reduce((acc, col) => {
+      acc[col.fk_column_id] = col.order;
+      return acc;
+    }, {} as Record<string, number>);
+
     if (!isNoneList && !columnsList.length) {
       columnsList = await ncMeta.metaList2(null, null, MetaTable.COLUMNS, {
         condition: {
@@ -528,13 +524,22 @@ export default class Column<T = any> implements ColumnType {
 
       await NocoCache.setList(CacheScope.COLUMN, [fk_model_id], columnsList);
     }
+
     columnsList.sort(
       (a, b) =>
         (a.order != null ? a.order : Infinity) -
         (b.order != null ? b.order : Infinity),
     );
+
     return Promise.all(
       columnsList.map(async (m) => {
+        if (defaultViewColumns.length) {
+          m.meta = {
+            ...parseMetaProp(m),
+            defaultViewColOrder: defaultViewColumnOrderMap[m.id],
+          };
+        }
+
         const column = new Column(m);
         await column.getColOptions(ncMeta);
         return column;
@@ -834,78 +839,38 @@ export default class Column<T = any> implements ColumnType {
         fk_column_id: col.id,
       });
       await NocoCache.deepDel(
-        cacheScopeName,
         `${cacheScopeName}:${col.id}`,
         CacheDelDirection.CHILD_TO_PARENT,
       );
     }
 
-    // Grid View Columns
-    await ncMeta.metaDelete(null, null, MetaTable.GRID_VIEW_COLUMNS, {
-      fk_column_id: col.id,
-    });
-    const gridViewColumnId = await NocoCache.get(
-      `${CacheScope.GRID_VIEW_COLUMN}:${col.id}`,
-      CacheGetType.TYPE_STRING,
-    );
-    if (gridViewColumnId) {
-      await NocoCache.deepDel(
-        CacheScope.GRID_VIEW_COLUMN,
-        `${CacheScope.GRID_VIEW_COLUMN}:${gridViewColumnId}`,
-        CacheDelDirection.CHILD_TO_PARENT,
-      );
-      await NocoCache.del(`${CacheScope.GRID_VIEW_COLUMN}:${col.id}`);
-    }
+    // Delete from all view columns
+    const viewColumnTables = [
+      MetaTable.GRID_VIEW_COLUMNS,
+      MetaTable.FORM_VIEW_COLUMNS,
+      MetaTable.KANBAN_VIEW_COLUMNS,
+      MetaTable.GALLERY_VIEW_COLUMNS,
+    ];
+    const viewColumnCacheScope = [
+      CacheScope.GRID_VIEW_COLUMN,
+      CacheScope.FORM_VIEW_COLUMN,
+      CacheScope.KANBAN_VIEW_COLUMN,
+      CacheScope.GALLERY_VIEW_COLUMN,
+    ];
 
-    // Form View Columns
-    await ncMeta.metaDelete(null, null, MetaTable.FORM_VIEW_COLUMNS, {
-      fk_column_id: col.id,
-    });
-    const formViewColumnId = await NocoCache.get(
-      `${CacheScope.FORM_VIEW_COLUMN}:${col.id}`,
-      CacheGetType.TYPE_STRING,
-    );
-    if (formViewColumnId) {
-      await NocoCache.deepDel(
-        CacheScope.FORM_VIEW_COLUMN,
-        `${CacheScope.FORM_VIEW_COLUMN}:${formViewColumnId}`,
-        CacheDelDirection.CHILD_TO_PARENT,
-      );
-      await NocoCache.del(`${CacheScope.FORM_VIEW_COLUMN}:${col.id}`);
-    }
-
-    // Kanban View Columns
-    await ncMeta.metaDelete(null, null, MetaTable.KANBAN_VIEW_COLUMNS, {
-      fk_column_id: col.id,
-    });
-    const kanbanViewColumnId = await NocoCache.get(
-      `${CacheScope.KANBAN_VIEW_COLUMN}:${col.id}`,
-      CacheGetType.TYPE_STRING,
-    );
-    if (kanbanViewColumnId) {
-      await NocoCache.deepDel(
-        CacheScope.KANBAN_VIEW_COLUMN,
-        `${CacheScope.KANBAN_VIEW_COLUMN}:${kanbanViewColumnId}`,
-        CacheDelDirection.CHILD_TO_PARENT,
-      );
-      await NocoCache.del(`${CacheScope.KANBAN_VIEW_COLUMN}:${col.id}`);
-    }
-
-    // Gallery View Column
-    await ncMeta.metaDelete(null, null, MetaTable.GALLERY_VIEW_COLUMNS, {
-      fk_column_id: col.id,
-    });
-    const galleryViewColumnId = await NocoCache.get(
-      `${CacheScope.GALLERY_VIEW_COLUMN}:${col.id}`,
-      CacheGetType.TYPE_STRING,
-    );
-    if (galleryViewColumnId) {
-      await NocoCache.deepDel(
-        CacheScope.GALLERY_VIEW_COLUMN,
-        `${CacheScope.GALLERY_VIEW_COLUMN}:${galleryViewColumnId}`,
-        CacheDelDirection.CHILD_TO_PARENT,
-      );
-      await NocoCache.del(`${CacheScope.GALLERY_VIEW_COLUMN}:${col.id}`);
+    for (let i = 0; i < viewColumnTables.length; i++) {
+      const table = viewColumnTables[i];
+      const cacheScope = viewColumnCacheScope[i];
+      const viewColumns = await ncMeta.metaList2(null, null, table, {
+        condition: { fk_column_id: id },
+      });
+      await ncMeta.metaDelete(null, null, table, { fk_column_id: id });
+      for (const viewColumn of viewColumns) {
+        await NocoCache.deepDel(
+          `${cacheScope}:${viewColumn.id}`,
+          CacheDelDirection.CHILD_TO_PARENT,
+        );
+      }
     }
 
     // Get LTAR columns in which current column is referenced as foreign key
@@ -933,14 +898,13 @@ export default class Column<T = any> implements ColumnType {
     // Columns
     await ncMeta.metaDelete(null, null, MetaTable.COLUMNS, col.id);
     await NocoCache.deepDel(
-      CacheScope.COLUMN,
       `${CacheScope.COLUMN}:${col.id}`,
       CacheDelDirection.CHILD_TO_PARENT,
     );
 
     // on column delete, delete any optimised single query cache
     {
-      await NocoCache.delAll(CacheScope.SINGLE_QUERY, `${col.fk_model_id}:*`);
+      await View.clearSingleQueryCache(col.fk_model_id, null, ncMeta);
     }
   }
 
@@ -948,6 +912,7 @@ export default class Column<T = any> implements ColumnType {
     colId: string,
     column: Partial<Column> & Partial<Pick<ColumnReqType, 'column_order'>>,
     ncMeta = Noco.ncMeta,
+    skipFormulaInvalidate = false,
   ) {
     const oldCol = await Column.get({ colId }, ncMeta);
 
@@ -959,7 +924,6 @@ export default class Column<T = any> implements ColumnType {
           fk_column_id: colId,
         });
         await NocoCache.deepDel(
-          CacheScope.COL_LOOKUP,
           `${CacheScope.COL_LOOKUP}:${colId}`,
           CacheDelDirection.CHILD_TO_PARENT,
         );
@@ -970,7 +934,6 @@ export default class Column<T = any> implements ColumnType {
           fk_column_id: colId,
         });
         await NocoCache.deepDel(
-          CacheScope.COL_ROLLUP,
           `${CacheScope.COL_ROLLUP}:${colId}`,
           CacheDelDirection.CHILD_TO_PARENT,
         );
@@ -982,7 +945,6 @@ export default class Column<T = any> implements ColumnType {
           fk_column_id: colId,
         });
         await NocoCache.deepDel(
-          CacheScope.COL_RELATION,
           `${CacheScope.COL_RELATION}:${colId}`,
           CacheDelDirection.CHILD_TO_PARENT,
         );
@@ -994,7 +956,6 @@ export default class Column<T = any> implements ColumnType {
         });
 
         await NocoCache.deepDel(
-          CacheScope.COL_FORMULA,
           `${CacheScope.COL_FORMULA}:${colId}`,
           CacheDelDirection.CHILD_TO_PARENT,
         );
@@ -1006,7 +967,6 @@ export default class Column<T = any> implements ColumnType {
         });
 
         await NocoCache.deepDel(
-          CacheScope.COL_QRCODE,
           `${CacheScope.COL_QRCODE}:${colId}`,
           CacheDelDirection.CHILD_TO_PARENT,
         );
@@ -1019,7 +979,6 @@ export default class Column<T = any> implements ColumnType {
         });
 
         await NocoCache.deepDel(
-          CacheScope.COL_BARCODE,
           `${CacheScope.COL_BARCODE}:${colId}`,
           CacheDelDirection.CHILD_TO_PARENT,
         );
@@ -1033,7 +992,6 @@ export default class Column<T = any> implements ColumnType {
         });
 
         await NocoCache.deepDel(
-          CacheScope.COL_SELECT_OPTION,
           `${CacheScope.COL_SELECT_OPTION}:${colId}:list`,
           CacheDelDirection.PARENT_TO_CHILD,
         );
@@ -1106,42 +1064,15 @@ export default class Column<T = any> implements ColumnType {
       column.column_order.view_id
     ) {
       const viewColumn = (
-        await View.getColumns(column.column_order.view_id)
+        await View.getColumns(column.column_order.view_id, ncMeta)
       ).find((col) => col.fk_column_id === column.id);
-      await View.updateColumn(column.column_order.view_id, viewColumn.id, {
-        order: column.column_order.order,
-      });
-    }
-
-    // get existing cache
-    const key = `${CacheScope.COLUMN}:${colId}`;
-    let o = await NocoCache.get(key, CacheGetType.TYPE_OBJECT);
-    if (o) {
-      o = { ...o, ...updateObj };
-      // set cache
-      await NocoCache.set(key, o);
-    }
-
-    // get model column list from cache
-    const columnListFromCache = await NocoCache.getList(CacheScope.COLUMN, [
-      oldCol.fk_model_id,
-    ]);
-
-    // update column list in cache if cache exists
-    if (!columnListFromCache.list?.length) {
-      const updatedColumnList = columnListFromCache.list.map((column: any) => {
-        if (column.id === colId) {
-          return {
-            ...column,
-            ...updateObj,
-          };
-        }
-        return column;
-      });
-      await NocoCache.setList(
-        CacheScope.COLUMN,
-        [oldCol.fk_model_id],
-        updatedColumnList,
+      await View.updateColumn(
+        column.column_order.view_id,
+        viewColumn.id,
+        {
+          order: column.column_order.order,
+        },
+        ncMeta,
       );
     }
 
@@ -1150,39 +1081,50 @@ export default class Column<T = any> implements ColumnType {
       null,
       null,
       MetaTable.COLUMNS,
-      {
-        ...updateObj,
-        meta:
-          updateObj.meta && typeof updateObj.meta === 'object'
-            ? JSON.stringify(updateObj.meta)
-            : updateObj.meta,
-      },
+      prepareForDb(updateObj),
       colId,
     );
+
+    await NocoCache.update(
+      `${CacheScope.COLUMN}:${colId}`,
+      prepareForResponse(updateObj),
+    );
+
     await this.insertColOption(column, colId, ncMeta);
 
     // on column update, delete any optimised single query cache
-    await NocoCache.delAll(CacheScope.SINGLE_QUERY, `${oldCol.fk_model_id}:*`);
+    await View.clearSingleQueryCache(oldCol.fk_model_id, null, ncMeta);
 
-    const updatedColumn = await Column.get({ colId });
-
-    // invalidate formula parsed-tree in which current column is used
-    // whenever a new request comes for that formula, it will be populated again
-    getFormulasReferredTheColumn({
-      column: updatedColumn,
-      columns: await Column.list({ fk_model_id: column.fk_model_id }),
-    })
-      .then(async (formulas) => {
-        for (const formula of formulas) {
-          await FormulaColumn.update(formula.id, {
-            parsed_tree: null,
-          });
-        }
-      })
-      // ignore the error and continue, if formula is no longer valid it will be captured in the next run
-      .catch((err) => {
-        logger.error(err);
-      });
+    const updatedColumn = await Column.get({ colId }, ncMeta);
+    if (!skipFormulaInvalidate) {
+      // invalidate formula parsed-tree in which current column is used
+      // whenever a new request comes for that formula, it will be populated again
+      getFormulasReferredTheColumn(
+        {
+          column: updatedColumn,
+          columns: await Column.list(
+            { fk_model_id: oldCol.fk_model_id },
+            ncMeta,
+          ),
+        },
+        ncMeta,
+      )
+        .then(async (formulas) => {
+          for (const formula of formulas) {
+            await FormulaColumn.update(
+              formula.id,
+              {
+                parsed_tree: null,
+              },
+              ncMeta,
+            );
+          }
+        })
+        // ignore the error and continue, if formula is no longer valid it will be captured in the next run
+        .catch((err) => {
+          logger.error(err);
+        });
+    }
   }
 
   static async updateAlias(
@@ -1190,15 +1132,6 @@ export default class Column<T = any> implements ColumnType {
     { title }: { title: string },
     ncMeta = Noco.ncMeta,
   ) {
-    // get existing cache
-    const key = `${CacheScope.COLUMN}:${colId}`;
-    const o = await NocoCache.get(key, CacheGetType.TYPE_OBJECT);
-    if (o) {
-      // update data
-      o.title = title;
-      // set cache
-      await NocoCache.set(key, o);
-    }
     // set meta
     await ncMeta.metaUpdate(
       null, //column.base_id || column.source_id,
@@ -1210,8 +1143,11 @@ export default class Column<T = any> implements ColumnType {
       colId,
     );
 
+    await NocoCache.update(`${CacheScope.COLUMN}:${colId}`, { title });
+
     const column = await Column.get({ colId }, ncMeta);
-    await NocoCache.delAll(CacheScope.SINGLE_QUERY, `${column.fk_model_id}:*`);
+
+    await View.clearSingleQueryCache(column.fk_model_id, null, ncMeta);
   }
 
   public getValidators(): any {
@@ -1269,15 +1205,6 @@ export default class Column<T = any> implements ColumnType {
     system = true,
     ncMeta = Noco.ncMeta,
   ) {
-    // get existing cache
-    const key = `${CacheScope.COLUMN}:${colId}`;
-    const o = await NocoCache.get(key, CacheGetType.TYPE_OBJECT);
-    if (o) {
-      // update data
-      o.system = system;
-      // set cache
-      await NocoCache.set(key, o);
-    }
     // update system field in meta db
     await ncMeta.metaUpdate(
       null,
@@ -1288,6 +1215,8 @@ export default class Column<T = any> implements ColumnType {
       },
       colId,
     );
+
+    await NocoCache.update(`${CacheScope.COLUMN}:${colId}`, { system });
   }
 
   static getMaxColumnNameLength(sqlClientType: string) {
@@ -1307,24 +1236,313 @@ export default class Column<T = any> implements ColumnType {
     { colId, meta }: { colId: string; meta: any },
     ncMeta = Noco.ncMeta,
   ) {
-    // get existing cache
-    const key = `${CacheScope.COLUMN}:${colId}`;
-    const o = await NocoCache.get(key, CacheGetType.TYPE_OBJECT);
-    if (o) {
-      // update meta
-      o.meta = meta;
-      // set cache
-      await NocoCache.set(key, o);
-    }
     // set meta
     await ncMeta.metaUpdate(
       null,
       null,
       MetaTable.COLUMNS,
-      {
-        meta: stringifyMetaProp({ meta }),
-      },
+      prepareForDb({ meta }),
       colId,
     );
+
+    await NocoCache.update(
+      `${CacheScope.COLUMN}:${colId}`,
+      prepareForResponse({ meta }),
+    );
+  }
+
+  static async bulkInsert(
+    param: {
+      columns: Column[];
+      fk_model_id: any;
+      source_id: string;
+      base_id: string;
+    },
+    ncMeta = Noco.ncMeta,
+  ) {
+    const extractedColumnMetas = [];
+    const columns = [];
+
+    // add fk_model_id
+    for (const column of param.columns) {
+      // pre-populate column meta to use while inserting colOptions
+      const id = await ncMeta.genNanoid(MetaTable.COLUMNS);
+      const colWithId = {
+        ...column,
+        id,
+        base_id: param.base_id,
+        source_id: param.source_id,
+        fk_model_id: param.fk_model_id,
+      };
+
+      const insertObj = extractProps(colWithId as any, [
+        'id',
+        'fk_model_id',
+        'column_name',
+        'title',
+        'uidt',
+        'dt',
+        'np',
+        'ns',
+        'clen',
+        'cop',
+        'pk',
+        'rqd',
+        'un',
+        'ct',
+        'ai',
+        'unique',
+        'cdf',
+        'cc',
+        'csn',
+        'dtx',
+        'dtxp',
+        'dtxs',
+        'au',
+        'pv',
+        'order',
+        'base_id',
+        'source_id',
+        'system',
+        'meta',
+      ]);
+
+      if (column.meta && typeof column.meta === 'object') {
+        insertObj.meta = JSON.stringify(column.meta);
+      }
+
+      if (column.validate) {
+        if (typeof column.validate === 'string')
+          insertObj.validate = column.validate;
+        else insertObj.validate = JSON.stringify(column.validate);
+      }
+      extractedColumnMetas.push(insertObj);
+
+      columns.push(colWithId);
+    }
+
+    // bulk insert columns
+    await ncMeta.bulkMetaInsert(
+      null,
+      null,
+      MetaTable.COLUMNS,
+      extractedColumnMetas,
+      true,
+    );
+
+    await Column.bulkInsertColOption(columns, ncMeta);
+
+    return columns;
+  }
+
+  private static async bulkInsertColOption<T>(
+    columns: (Partial<T> & { source_id?: string; [p: string]: any })[],
+    ncMeta = Noco.ncMeta,
+  ) {
+    const insertGroups = new Map<UITypes, Record<string, any>[]>();
+
+    for (const column of columns) {
+      let insertArr = insertGroups.get(
+        column.uidt === UITypes.MultiSelect
+          ? UITypes.SingleSelect
+          : column.uidt,
+      );
+      if (!insertArr) {
+        insertGroups.set(column.uidt, (insertArr = []));
+      }
+      switch (column.uidt || column.ui_data_type) {
+        case UITypes.Lookup:
+          // LookupColumn.insert()
+          insertArr.push({
+            fk_column_id: column.id,
+            fk_relation_column_id: column.fk_relation_column_id,
+            fk_lookup_column_id: column.fk_lookup_column_id,
+          });
+          break;
+
+        case UITypes.Rollup: {
+          insertArr.push({
+            fk_column_id: column.id,
+            fk_relation_column_id: column.fk_relation_column_id,
+
+            fk_rollup_column_id: column.fk_rollup_column_id,
+            rollup_function: column.rollup_function,
+          });
+          break;
+        }
+        case UITypes.Links:
+        case UITypes.LinkToAnotherRecord: {
+          insertArr.push({
+            fk_column_id: column.id,
+            type: column.type,
+
+            fk_child_column_id: column.fk_child_column_id,
+            fk_parent_column_id: column.fk_parent_column_id,
+
+            fk_mm_model_id: column.fk_mm_model_id,
+            fk_mm_child_column_id: column.fk_mm_child_column_id,
+            fk_mm_parent_column_id: column.fk_mm_parent_column_id,
+
+            ur: column.ur,
+            dr: column.dr,
+
+            fk_index_name: column.fk_index_name,
+            fk_related_model_id: column.fk_related_model_id,
+
+            virtual: column.virtual,
+          });
+          break;
+        }
+        case UITypes.QrCode: {
+          insertArr.push(
+            {
+              fk_column_id: column.id,
+              fk_qr_value_column_id: column.fk_qr_value_column_id,
+            },
+            ncMeta,
+          );
+          break;
+        }
+        case UITypes.Barcode: {
+          insertArr.push({
+            fk_column_id: column.id,
+            fk_barcode_value_column_id: column.fk_barcode_value_column_id,
+            barcode_format: column.barcode_format,
+          });
+          break;
+        }
+        case UITypes.Formula: {
+          insertArr.push({
+            fk_column_id: column.id,
+            formula: column.formula,
+            formula_raw: column.formula_raw,
+            parsed_tree: column.parsed_tree,
+          });
+          break;
+        }
+        case UITypes.MultiSelect: {
+          if (!column.colOptions?.options) {
+            for (const [i, option] of column.dtxp?.split(',').entries() ||
+              [].entries()) {
+              insertArr.push({
+                fk_column_id: column.id,
+                title: option.replace(/^'/, '').replace(/'$/, ''),
+                order: i + 1,
+                color: selectColors[i % selectColors.length],
+              });
+            }
+          } else {
+            for (const [i, option] of column.colOptions.options.entries() ||
+              [].entries()) {
+              // Trim end of enum/set
+              if (column.dt === 'enum' || column.dt === 'set') {
+                option.title = option.title.trimEnd();
+              }
+              insertArr.push({
+                color: selectColors[i % selectColors.length], // in case color is not provided
+                ...extractProps(option, ['title', 'fk_column_id', 'color']),
+                fk_column_id: column.id,
+                order: i + 1,
+              });
+            }
+          }
+          break;
+        }
+        case UITypes.SingleSelect: {
+          if (!column.colOptions?.options) {
+            for (const [i, option] of column.dtxp?.split(',').entries() ||
+              [].entries()) {
+              insertArr.push({
+                fk_column_id: column.id,
+                title: option.replace(/^'/, '').replace(/'$/, ''),
+                order: i + 1,
+                color: selectColors[i % selectColors.length],
+              });
+            }
+          } else {
+            for (const [i, option] of column.colOptions.options.entries() ||
+              [].entries()) {
+              // Trim end of enum/set
+              if (column.dt === 'enum' || column.dt === 'set') {
+                option.title = option.title.trimEnd();
+              }
+              insertArr.push({
+                color: selectColors[i % selectColors.length], // in case color is not provided
+                ...extractProps(option, ['title', 'fk_column_id', 'color']),
+                fk_column_id: column.id,
+                order: i + 1,
+              });
+            }
+          }
+          break;
+        }
+      }
+    }
+
+    // bulk insert column options
+    for (const group of insertGroups.keys()) {
+      switch (group) {
+        case UITypes.SingleSelect:
+        case UITypes.MultiSelect:
+          await ncMeta.bulkMetaInsert(
+            null,
+            null,
+            MetaTable.COL_SELECT_OPTIONS,
+            insertGroups.get(group),
+          );
+          break;
+
+        case UITypes.Lookup:
+          await ncMeta.bulkMetaInsert(
+            null,
+            null,
+            MetaTable.COL_LOOKUP,
+            insertGroups.get(group),
+          );
+          break;
+
+        case UITypes.Rollup:
+          await ncMeta.bulkMetaInsert(
+            null,
+            null,
+            MetaTable.COL_ROLLUP,
+            insertGroups.get(group),
+          );
+          break;
+        case UITypes.Links:
+        case UITypes.LinkToAnotherRecord:
+          await ncMeta.bulkMetaInsert(
+            null,
+            null,
+            MetaTable.COL_RELATIONS,
+            insertGroups.get(group),
+          );
+          break;
+        case UITypes.QrCode:
+          await ncMeta.bulkMetaInsert(
+            null,
+            null,
+            MetaTable.COL_QRCODE,
+            insertGroups.get(group),
+          );
+          break;
+        case UITypes.Barcode:
+          await ncMeta.bulkMetaInsert(
+            null,
+            null,
+            MetaTable.COL_BARCODE,
+            insertGroups.get(group),
+          );
+          break;
+        case UITypes.Formula:
+          await ncMeta.bulkMetaInsert(
+            null,
+            null,
+            MetaTable.COL_FORMULA,
+            insertGroups.get(group),
+          );
+          break;
+      }
+    }
   }
 }

@@ -2,8 +2,6 @@ import type { BaseType } from 'nocodb-sdk'
 import { acceptHMRUpdate, defineStore } from 'pinia'
 import { message } from 'ant-design-vue'
 import { isString } from '@vue/shared'
-import { computed, navigateTo, ref, useBases, useCommandPalette, useNuxtApp, useRouter, useTheme } from '#imports'
-import type { ThemeConfig } from '#imports'
 
 export const useWorkspace = defineStore('workspaceStore', () => {
   const basesStore = useBases()
@@ -48,6 +46,8 @@ export const useWorkspace = defineStore('workspaceStore', () => {
     return { id: 'default', title: 'default', meta: {}, roles: '' } as any
   })
 
+  const workspaceRole = computed(() => activeWorkspace.value?.roles)
+
   const activeWorkspaceMeta = computed<Record<string, any>>(() => {
     const defaultMeta = {}
     if (!activeWorkspace.value) return defaultMeta
@@ -79,6 +79,8 @@ export const useWorkspace = defineStore('workspaceStore', () => {
   const updateCollaborator = async (..._args: any) => {}
 
   const loadWorkspace = async (..._args: any) => {}
+
+  const moveToOrg = async (..._args: any) => {}
 
   async function populateWorkspace(..._args: any) {
     isWorkspaceLoading.value = true
@@ -199,8 +201,14 @@ export const useWorkspace = defineStore('workspaceStore', () => {
     })
   }
 
-  const navigateToWorkspaceSettings = async () => {
-    navigateTo('/account/users')
+  const navigateToWorkspaceSettings = async (_?: string, cmdOrCtrl?: boolean) => {
+    if (cmdOrCtrl) {
+      await navigateTo('#/account/users', {
+        open: navigateToBlankTargetOpenOption,
+      })
+    } else {
+      await navigateTo('/account/users')
+    }
   }
 
   function setLoadingState(isLoading = false) {
@@ -246,6 +254,8 @@ export const useWorkspace = defineStore('workspaceStore', () => {
     isWorkspaceSettingsPageOpened,
     workspaceUserCount,
     getPlanLimit,
+    workspaceRole,
+    moveToOrg,
   }
 })
 

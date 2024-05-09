@@ -155,6 +155,7 @@ export interface NcContext {
   workspace: WorkspaceType;
   defaultProjectTitle: string;
   defaultTableTitle: string;
+  api: Api<any>;
 }
 
 selectors.setTestIdAttribute('data-testid');
@@ -169,19 +170,21 @@ async function localInit({
   baseType = ProjectTypes.DATABASE,
   isSuperUser = false,
   dbType,
+  resetSsoClients = false,
 }: {
   workerId: string;
   isEmptyProject?: boolean;
   baseType?: ProjectTypes;
   isSuperUser?: boolean;
   dbType?: string;
+  resetSsoClients?: boolean;
 }) {
   const parallelId = process.env.TEST_PARALLEL_INDEX;
 
   try {
     let response: AxiosResponse<any, any>;
     // Login as root user
-    if (isSuperUser && !isEE()) {
+    if (isSuperUser && process.env.NC_CLOUD !== 'true') {
       // required for configuring license key settings
       response = await axios.post('http://localhost:8080/api/v1/auth/user/signin', {
         email: `user@nocodb.com`,
@@ -208,6 +211,18 @@ async function localInit({
     const baseTitle = `pgExtREST${workerId}`;
 
     // console.log(process.env.TEST_WORKER_INDEX, process.env.TEST_PARALLEL_INDEX);
+
+    // delete sso-clients
+    if (resetSsoClients && isEE() && api['ssoClient'] && isSuperUser) {
+      const clients = await api.ssoClient.list();
+      for (const client of clients.list) {
+        try {
+          await api.ssoClient.delete(client.id);
+        } catch (e) {
+          console.log(`Error deleting sso-client: ${client.id}`);
+        }
+      }
+    }
 
     if (isEE() && api['workspace']) {
       // Delete associated workspace
@@ -330,7 +345,7 @@ async function localInit({
 
     // get current user information
     const user = await api.auth.me();
-    return { data: { base, user, workspace, token }, status: 200 };
+    return { data: { base, user, workspace, token, api }, status: 200 };
   } catch (e) {
     console.error(`Error resetting base: ${process.env.TEST_PARALLEL_INDEX}`, e);
     return { data: {}, status: 500 };
@@ -343,12 +358,14 @@ const setup = async ({
   isEmptyProject = false,
   isSuperUser = false,
   url,
+  resetSsoClients = false,
 }: {
   baseType?: ProjectTypes;
   page: Page;
   isEmptyProject?: boolean;
   isSuperUser?: boolean;
   url?: string;
+  resetSsoClients?: boolean;
 }): Promise<NcContext> => {
   console.time('Setup');
 
@@ -372,6 +389,7 @@ const setup = async ({
       baseType,
       isSuperUser,
       dbType,
+      resetSsoClients,
     });
   } catch (e) {
     console.error(`Error resetting base: ${process.env.TEST_PARALLEL_INDEX}`, e);
@@ -398,9 +416,9 @@ const setup = async ({
     // ignore error: some roles will not have permission for license reset
     // console.error(`Error resetting base: ${process.env.TEST_PARALLEL_INDEX}`, e);
   }
-
   await page.addInitScript(
     async ({ token }) => {
+      if (location.search?.match(/code=|short-token=|skip-init-script=/)) return;
       try {
         let initialLocalStorage = {};
         try {
@@ -408,6 +426,9 @@ const setup = async ({
         } catch (e) {
           console.error('Failed to parse local storage', e);
         }
+
+        if (initialLocalStorage?.token) return;
+
         window.localStorage.setItem(
           'nocodb-gui-v2',
           JSON.stringify({
@@ -457,6 +478,7 @@ const setup = async ({
     workspace,
     defaultProjectTitle: 'Getting Started',
     defaultTableTitle: 'Features',
+    api: response?.data?.api,
   } as NcContext;
 };
 

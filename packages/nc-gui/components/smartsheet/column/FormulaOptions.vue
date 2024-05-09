@@ -5,32 +5,12 @@ import jsep from 'jsep'
 import {
   FormulaError,
   UITypes,
+  isHiddenCol,
   jsepCurlyHook,
   substituteColumnIdWithAliasInFormula,
   validateFormulaAndExtractTreeWithType,
 } from 'nocodb-sdk'
 import type { ColumnType, FormulaType } from 'nocodb-sdk'
-import {
-  MetaInj,
-  NcAutocompleteTree,
-  computed,
-  formulaList,
-  formulas,
-  getUIDTIcon,
-  getWordUntilCaret,
-  iconMap,
-  inject,
-  insertAtCursor,
-  nextTick,
-  onMounted,
-  ref,
-  useColumnCreateStoreOrThrow,
-  useDebounceFn,
-  useI18n,
-  useMetas,
-  useNocoEe,
-  useVModel,
-} from '#imports'
 
 const props = defineProps<{
   value: any
@@ -51,7 +31,18 @@ const { predictFunction: _predictFunction } = useNocoEe()
 const meta = inject(MetaInj, ref())
 
 const supportedColumns = computed(
-  () => meta?.value?.columns?.filter((col) => !uiTypesNotSupportedInFormulas.includes(col.uidt as UITypes)) || [],
+  () =>
+    meta?.value?.columns?.filter((col) => {
+      if (uiTypesNotSupportedInFormulas.includes(col.uidt as UITypes)) {
+        return false
+      }
+
+      if (isHiddenCol(col)) {
+        return false
+      }
+
+      return true
+    }) || [],
 )
 const { getMeta } = useMetas()
 
@@ -320,7 +311,7 @@ onMounted(() => {
         </div>
       </div>
       <div class="flex flex-row mt-1 mb-3 justify-end pr-3">
-        <a target="_blank" rel="noopener noreferrer" :href="suggestionPreviewed.docsUrl">
+        <a v-if="suggestionPreviewed.docsUrl" target="_blank" rel="noopener noreferrer" :href="suggestionPreviewed.docsUrl">
           <NcButton type="text" class="!text-gray-400 !hover:text-gray-800 !text-xs"
             >View in Docs
             <GeneralIcon icon="openInNew" class="ml-1" />

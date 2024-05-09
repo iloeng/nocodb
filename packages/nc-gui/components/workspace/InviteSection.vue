@@ -1,12 +1,14 @@
 <script lang="ts" setup>
 import { onKeyStroke } from '@vueuse/core'
+import type { RoleLabels } from 'nocodb-sdk'
 import { OrderedWorkspaceRoles, WorkspaceUserRoles } from 'nocodb-sdk'
-import { extractSdkResponseErrorMsg, useWorkspace } from '#imports'
+
 import { validateEmail } from '~/utils/validation'
+import { extractEmail } from '~/helpers/parsers/parserHelpers'
 
 const inviteData = reactive({
   email: '',
-  roles: WorkspaceUserRoles.VIEWER,
+  roles: WorkspaceUserRoles.NO_ACCESS,
 })
 
 const focusRef = ref<HTMLInputElement>()
@@ -41,13 +43,17 @@ const insertOrUpdateString = (str: string) => {
   emailBadges.value.push(str)
 }
 
-const emailInputValidation = (input: string): boolean => {
+const emailInputValidation = (input: string, isBulkEmailCopyPaste: boolean = false): boolean => {
   if (!input.length) {
+    if (isBulkEmailCopyPaste) return false
+
     emailValidation.isError = true
     emailValidation.message = 'Email should not be empty'
     return false
   }
   if (!validateEmail(input.trim())) {
+    if (isBulkEmailCopyPaste) return false
+
     emailValidation.isError = true
     emailValidation.message = 'Invalid Email'
     return false
@@ -163,6 +169,8 @@ onKeyStroke('Backspace', () => {
 
 // when bulk email is pasted
 const onPaste = (e: ClipboardEvent) => {
+  emailValidation.isError = false
+
   const pastedText = e.clipboardData?.getData('text')
 
   const inputArray = pastedText?.split(',') || pastedText?.split(' ')
@@ -174,7 +182,9 @@ const onPaste = (e: ClipboardEvent) => {
   }
 
   inputArray?.forEach((el) => {
-    const isEmailIsValid = emailInputValidation(el)
+    el = extractEmail(el) || el
+
+    const isEmailIsValid = emailInputValidation(el, inputArray.length > 1)
 
     if (!isEmailIsValid) return
 
@@ -192,6 +202,8 @@ const onPaste = (e: ClipboardEvent) => {
   })
   inviteData.email = ''
 }
+
+const onRoleChange = (role: keyof typeof RoleLabels) => (inviteData.roles = role as WorkspaceUserRoles)
 </script>
 
 <template>
@@ -233,14 +245,16 @@ const onPaste = (e: ClipboardEvent) => {
             @paste.prevent="onPaste"
           />
         </div>
-        <span v-if="emailValidation.isError" class="ml-2 text-red-500 text-[10px] mt-1.5">{{ emailValidation.message }}</span>
+        <span v-if="emailValidation.isError && emailValidation.message" class="ml-2 text-red-500 text-[10px] mt-1.5">{{
+          emailValidation.message
+        }}</span>
       </div>
       <RolesSelector
         size="md"
-        class="px-1"
+        class="px-1 min-w-[152px] nc-invite-role-selector"
         :role="inviteData.roles"
         :roles="allowedRoles"
-        :on-role-change="(role: WorkspaceUserRoles) => (inviteData.roles = role)"
+        :on-role-change="onRoleChange"
         :description="true"
       />
 
@@ -269,5 +283,9 @@ const onPaste = (e: ClipboardEvent) => {
 
 :deep(.ant-select-selection-item) {
   @apply mt-0.75;
+}
+
+:deep(.nc-invite-role-selector .nc-role-badge) {
+  @apply w-full;
 }
 </style>

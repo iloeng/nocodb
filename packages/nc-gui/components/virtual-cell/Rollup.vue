@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { ColumnType, LinkToAnotherRecordType, RollupType } from 'nocodb-sdk'
-import { CellValueInj, ColumnInj, MetaInj, computed, inject, isRollup, ref, useMetas, useShowNotEditableWarning } from '#imports'
 
 const { metas } = useMetas()
 
@@ -41,7 +40,7 @@ const childColumn = computed(() => {
 </script>
 
 <template>
-  <div @dblclick="activateShowEditNonEditableFieldWarning">
+  <div class="nc-cell-field" @dblclick="activateShowEditNonEditableFieldWarning">
     <div v-if="['count', 'avg', 'sum', 'countDistinct', 'sumDistinct', 'avgDistinct'].includes(colOptions.rollup_function)">
       {{ value }}
     </div>
