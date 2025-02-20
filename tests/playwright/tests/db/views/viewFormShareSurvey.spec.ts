@@ -20,9 +20,6 @@ test.describe('Share form', () => {
 
   test('Survey', async () => {
     if (enableQuickRun()) test.skip();
-
-    // close 'Team & Auth' tab
-    await dashboard.closeTab({ title: 'Team & Auth' });
     await dashboard.treeView.openTable({ title: 'Country' });
 
     await dashboard.viewSidebar.createFormView({
@@ -37,6 +34,8 @@ test.describe('Share form', () => {
     });
     await dashboard.form.showAnotherFormRadioButton.click();
     await dashboard.form.showAnotherFormAfter5SecRadioButton.click();
+
+    await dashboard.rootPage.waitForTimeout(200);
 
     const surveyLink = await dashboard.form.topbar.getSharedViewUrl(true);
     await dashboard.rootPage.waitForTimeout(2000);
@@ -83,6 +82,7 @@ test.describe('Share form', () => {
     await surveyForm.validateSuccessMessage({
       message: 'Thank you for submitting the form',
       showAnotherForm: true,
+      isCustomMsg: true,
     });
   });
 });

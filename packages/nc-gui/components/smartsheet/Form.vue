@@ -3,39 +3,27 @@ import Draggable from 'vuedraggable'
 import tinycolor from 'tinycolor2'
 import { Pane, Splitpanes } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
-import type { FormItemProps } from 'ant-design-vue'
+
 import {
   type AttachmentResType,
   type ColumnType,
+  type LinkToAnotherRecordType,
   ProjectRoles,
   RelationTypes,
   UITypes,
   ViewTypes,
   getSystemColumns,
   isLinksOrLTAR,
-  isSelectTypeCol,
   isVirtualCol,
 } from 'nocodb-sdk'
-import type { ImageCropperConfig } from '~/lib/types'
+import type { ValidateInfo } from 'ant-design-vue/es/form/useForm'
+import type { ImageCropperConfig } from '#imports'
 
 provide(IsFormInj, ref(true))
 provide(IsGalleryInj, ref(false))
 
 // todo: generate hideCols based on default values
 const hiddenCols = ['created_at', 'updated_at']
-
-const hiddenColTypes = [
-  UITypes.Rollup,
-  UITypes.Lookup,
-  UITypes.Formula,
-  UITypes.QrCode,
-  UITypes.Barcode,
-  UITypes.SpecificDBType,
-  UITypes.CreatedTime,
-  UITypes.LastModifiedTime,
-  UITypes.CreatedBy,
-  UITypes.LastModifiedBy,
-]
 
 const hiddenBubbleMenuOptions = [
   RichTextBubbleMenuOptions.code,
@@ -56,13 +44,11 @@ const { $api, $e } = useNuxtApp()
 
 const { isUIAllowed } = useRoles()
 
+const { metas, getMeta } = useMetas()
+
 const { base } = storeToRefs(useBase())
 
 const { getPossibleAttachmentSrc } = useAttachment()
-
-const formRef = ref()
-
-const formState = ref<Record<string, any>>({})
 
 const secondsRemain = ref(0)
 
@@ -78,13 +64,39 @@ const isPublic = inject(IsPublicInj, ref(false))
 
 const { loadFormView, insertRow, formColumnData, formViewData, updateFormView } = useViewData(meta, view)
 
+const {
+  formState,
+  localColumns,
+  visibleColumns,
+  activeRow,
+  activeField,
+  activeColumn,
+  isRequired,
+  updateView,
+  updateColMeta,
+  validateInfos,
+  validate,
+  clearValidate,
+  fieldMappings,
+  isValidRedirectUrl,
+  loadAllviewFilters,
+  allViewFilters,
+  checkFieldVisibility,
+} = useProvideFormViewStore(meta, view, formViewData, updateFormView, isEditable)
+
 const { preFillFormSearchParams } = storeToRefs(useViewsStore())
 
 const reloadEventHook = inject(ReloadViewDataHookInj, createEventHook())
 
-reloadEventHook.on(async () => {
-  await loadFormView()
-  setFormData()
+reloadEventHook.on(async (params) => {
+  if (params?.isFormFieldFilters) {
+    setTimeout(() => {
+      checkFieldVisibility()
+    }, 100)
+  } else {
+    await Promise.all([loadFormView(), loadReleatedMetas()])
+    setFormData()
+  }
 })
 
 const { fields, showAll, hideAll } = useViewColumnsOrThrow()
@@ -98,8 +110,6 @@ const { state, row } = useProvideSmartsheetRowStore(
 )
 
 const columns = computed(() => meta?.value?.columns || [])
-
-const localColumns = ref<Record<string, any>[]>([])
 
 const draggableRef = ref()
 
@@ -115,8 +125,6 @@ const drag = ref(false)
 const emailMe = ref(false)
 
 const submitted = ref(false)
-
-const activeRow = ref('')
 
 const isLoadingFormView = ref(false)
 
@@ -159,38 +167,105 @@ const autoScrollFormField = ref(false)
 
 const { t } = useI18n()
 
-const { betaFeatureToggleState } = useBetaFeatureToggle()
-
 const { open, onChange: onChangeFile } = useFileDialog({
   accept: 'image/*',
   multiple: false,
   reset: true,
 })
 
-const visibleColumns = computed(() => localColumns.value.filter((f) => f.show).sort((a, b) => a.order - b.order))
+const editOrAddProviderRef = ref()
+
+const onVisibilityChange = (state: 'showAddColumn' | 'showEditColumn') => {
+  dropdownStates.value[state] = true
+
+  if (editOrAddProviderRef.value && !editOrAddProviderRef.value?.shouldKeepModalOpen()) {
+    dropdownStates.value[state] = false
+  }
+}
 
 const getFormLogoSrc = computed(() => getPossibleAttachmentSrc(parseProp(formViewData.value?.logo_url)))
 
-const activeField = computed(() => visibleColumns.value.find((c) => c.id === activeRow.value) || null)
+const isOpenRedirectUrlOption = ref(false)
 
-const activeColumn = computed(() => {
-  if (meta.value && activeField.value) {
-    if (meta.value.columnsById && (meta.value.columnsById as Record<string, ColumnType>)[activeField.value?.fk_column_id]) {
-      return (meta.value.columnsById as Record<string, ColumnType>)[activeField.value.fk_column_id]
-    } else if (meta.value.columns) {
-      return meta.value.columns.find((c) => c.id === activeField.value?.fk_column_id) ?? null
-    }
-  }
-  return null
+const redirectLinkValidation = ref<ValidateInfo>({
+  validateStatus: '',
+  help: undefined,
 })
 
-const updateView = useDebounceFn(
-  () => {
-    updateFormView(formViewData.value)
+const isOpenRedirectUrl = computed({
+  get: () => {
+    return typeof formViewData.value?.redirect_url === 'string'
   },
-  300,
-  { maxWait: 2000 },
-)
+  set: (value: boolean) => {
+    isOpenRedirectUrlOption.value = value
+    if (value) {
+      formViewData.value = {
+        ...formViewData.value,
+        redirect_url: '',
+      }
+    } else {
+      formViewData.value = {
+        ...formViewData.value,
+        redirect_url: null,
+      }
+
+      redirectLinkValidation.value = {
+        validateStatus: '',
+        help: undefined,
+      }
+    }
+    updateView()
+  },
+})
+
+const handleUpdateRedirectUrl = () => {
+  const validStatus = isValidRedirectUrl()
+
+  redirectLinkValidation.value = {
+    ...validStatus,
+  }
+
+  if (validStatus.validateStatus === 'error') {
+    return
+  }
+
+  updateView()
+}
+
+const getPrefillValue = (c: ColumnType, value: any) => {
+  let preFillValue: any
+
+  switch (c.uidt) {
+    case UITypes.LinkToAnotherRecord:
+    case UITypes.Links: {
+      const values = Array.isArray(value) ? value : [value]
+      const fk_related_model_id = (c?.colOptions as LinkToAnotherRecordType)?.fk_related_model_id
+
+      if (!fk_related_model_id) return
+
+      const rowIds = values
+        .map((row) => {
+          return extractPkFromRow(row, metas.value[fk_related_model_id].columns || [])
+        })
+        .filter((rowId) => !!rowId)
+        .join(',')
+
+      preFillValue = rowIds || undefined
+      // if bt/oo then extract object from array
+      if (c.colOptions?.type === RelationTypes.BELONGS_TO || c.colOptions?.type === RelationTypes.ONE_TO_ONE) {
+        preFillValue = rowIds[0]
+      }
+
+      break
+    }
+
+    default: {
+      return value
+    }
+  }
+
+  return preFillValue
+}
 
 const updatePreFillFormSearchParams = useDebounceFn(() => {
   if (isLocked.value || !isUIAllowed('dataInsert')) return
@@ -200,8 +275,20 @@ const updatePreFillFormSearchParams = useDebounceFn(() => {
   const searchParams = new URLSearchParams()
 
   for (const c of visibleColumns.value) {
-    if (c.title && preFilledData[c.title] && !isVirtualCol(c) && !(UITypes.Attachment === c.uidt)) {
-      searchParams.append(c.title, preFilledData[c.title])
+    if (
+      !c.title ||
+      !isValidValue(preFilledData[c.title]) ||
+      (isVirtualCol(c) && !isLinksOrLTAR(c)) ||
+      isAttachment(c) ||
+      c.uidt === UITypes.SpecificDBType
+    ) {
+      continue
+    }
+
+    const preFillValue = getPrefillValue(c, preFilledData[c.title])
+
+    if (preFillValue !== undefined) {
+      searchParams.append(c.title, preFillValue)
     }
   }
 
@@ -209,32 +296,52 @@ const updatePreFillFormSearchParams = useDebounceFn(() => {
 }, 250)
 
 async function submitForm() {
-  if (isLocked.value || !isUIAllowed('dataInsert')) return
+  if (!isUIAllowed('dataInsert')) return
+
+  for (const col of localColumns.value) {
+    if (col.show && col.title && isRequired(col, col.required) && formState.value[col.title] === undefined) {
+      formState.value[col.title] = null
+    }
+
+    // handle filter out conditionally hidden field data
+    if ((!col.visible || !col.show) && col.title) {
+      delete formState.value[col.title]
+      delete state.value[col.title]
+    }
+  }
 
   try {
-    await formRef.value?.validateFields()
+    await validate(
+      Object.keys(formState.value)
+        .map((title) => fieldMappings.value[title])
+        .filter((v) => v !== undefined),
+    )
   } catch (e: any) {
-    if (e.errorFields.length) {
+    console.error(e)
+
+    if (e?.errorFields?.length) {
       message.error(t('msg.error.someOfTheRequiredFieldsAreEmpty'))
       return
     }
   }
 
-  await insertRow({
+  const res = await insertRow({
     row: { ...formState.value, ...state.value },
     oldRow: {},
     rowMeta: { new: true },
   })
 
-  submitted.value = true
+  if (res) {
+    submitted.value = true
+  }
 }
 
 async function clearForm() {
-  if (isLocked.value || !isUIAllowed('dataInsert')) return
+  if (!isUIAllowed('dataInsert')) return
 
   formState.value = {}
   state.value = {}
-  await formRef.value?.clearValidate()
+  clearValidate()
   reloadEventHook.trigger()
 }
 
@@ -249,7 +356,7 @@ function isDbRequired(column: Record<string, any>) {
       // column required / not null
       column.rqd &&
       // column default value
-      !column.cdf &&
+      !isValidValue(column?.cdf) &&
       // confirm it's not foreign key
       !columns.value.some(
         (c: Record<string, any>) =>
@@ -313,6 +420,8 @@ async function onMove(event: any, isVisibleFormFields = false) {
     return 0
   })
 
+  checkFieldVisibility()
+
   $e('a:form-view:reorder')
 }
 
@@ -374,8 +483,8 @@ async function handleAddOrRemoveAllColumns<T>(value: T) {
 }
 
 async function checkSMTPStatus() {
-  if (emailMe.value) {
-    const emailPluginActive = await $api.plugin.status('SMTP')
+  if (emailMe.value && !isEeUI) {
+    const emailPluginActive = await $api.plugin.status('smtp')
     if (!emailPluginActive) {
       emailMe.value = false
       // Please activate SMTP plugin in App store for enabling email notification
@@ -413,21 +522,11 @@ function setFormData() {
   emailMe.value = data[user.value?.email as string]
 
   localColumns.value = col
-    .filter((f) => !hiddenColTypes.includes(f.uidt) && !systemFieldsIds.value.includes(f.fk_column_id))
+    .filter((f) => !formViewHiddenColTypes.includes(f.uidt) && !systemFieldsIds.value.includes(f.fk_column_id))
     .sort((a, b) => a.order - b.order)
     .map((c) => ({ ...c, required: !!c.required }))
-}
 
-function isRequired(_columnObj: Record<string, any>, required = false) {
-  let columnObj = _columnObj
-  if (isLinksOrLTAR(columnObj.uidt) && columnObj.colOptions && columnObj.colOptions.type === RelationTypes.BELONGS_TO) {
-    columnObj = columns.value.find((c: Record<string, any>) => c.id === columnObj.colOptions.fk_child_column_id) as Record<
-      string,
-      any
-    >
-  }
-
-  return required || (columnObj && columnObj.rqd && !columnObj.cdf)
+  checkFieldVisibility()
 }
 
 async function updateEmail() {
@@ -476,21 +575,7 @@ async function deleteColumnCallback() {
   reloadEventHook.trigger()
 }
 
-const updateColMeta = useDebounceFn(async (col: Record<string, any>) => {
-  if (col.id && isEditable) {
-    try {
-      await $api.dbView.formColumnUpdate(col.id, col)
-    } catch (e: any) {
-      message.error(await extractSdkResponseErrorMsg(e))
-    }
-  }
-}, 250)
-
-const columnSupportsScanning = (elementType: UITypes) =>
-  betaFeatureToggleState.show &&
-  [UITypes.SingleLineText, UITypes.Number, UITypes.Email, UITypes.URL, UITypes.LongText].includes(elementType)
-
-const onFormItemClick = (element: any, sidebarClick: boolean = false) => {
+const onFormItemClick = (element: any, sidebarClick = false) => {
   if (isLocked.value || !isEditable) return
 
   if (sidebarClick) {
@@ -570,69 +655,65 @@ const handleOnUploadImage = (data: AttachmentResType = null) => {
   updateView()
 }
 
-const validateFormEmail = async (_rule, value) => {
-  if (!value) {
-    return Promise.resolve()
-  } else if (!validateEmail(value)) {
-    return Promise.reject(t('msg.error.invalidEmail'))
-  }
-}
-
-const validateFormURL = async (_rule, value) => {
-  if (!value) {
-    return Promise.resolve()
-  } else if (!isValidURL(value)) {
-    return Promise.reject(t('msg.error.invalidURL'))
-  }
-}
-
-const formElementValidationRules = (element) => {
-  const rules: FormItemProps['rules'] = [
-    {
-      required: isRequired(element, element.required),
-      message: t('msg.error.fieldRequired', { value: 'This field' }),
-      ...(element.uidt === UITypes.Checkbox && isRequired(element, element.required) ? { type: 'enum', enum: [1, true] } : {}),
-    },
-  ]
-
-  if (parseProp(element.meta).validate && element.uidt === UITypes.URL) {
-    rules.push({
-      validator: validateFormURL,
-    })
-  } else if (parseProp(element.meta).validate && element.uidt === UITypes.Email) {
-    rules.push({
-      validator: validateFormEmail,
-    })
-  }
-
-  if ([UITypes.Number, UITypes.Currency, UITypes.Percent].includes(element.uidt)) {
-    rules.push({
-      type: 'number',
-      message: t('msg.plsEnterANumber'),
-    })
-  }
-
-  return rules
-}
+const isFocusedFieldLabel = ref(false)
 
 const onFocusActiveFieldLabel = (e: FocusEvent) => {
+  isFocusedFieldLabel.value = true
+
+  if (activeField.value && !activeField.value.label) {
+    activeField.value.label = activeField.value?.title ?? ''
+  }
+
   ;(e.target as HTMLTextAreaElement).select()
 }
+
+const activeFieldLabel = computed(() => {
+  if (!isFocusedFieldLabel.value && !activeField.value?.label) {
+    return activeField.value?.title
+  }
+
+  return activeField.value?.label ?? ''
+})
+
+onClickOutside(focusLabel, () => {
+  isFocusedFieldLabel.value = false
+})
 
 const updateFieldTitle = (value: string) => {
   if (!activeField.value) return
 
-  if (activeField.value.title === value) {
-    activeField.value.label = null
-  } else {
-    activeField.value.label = value
+  activeField.value.label = value.trimStart()
+}
+
+const handleAutoScrollFormField = (title: string, isSidebar: boolean) => {
+  const field = document.querySelector(
+    `${isSidebar ? '.nc-form-field-item-' : '.nc-form-drag-'}${CSS.escape(title?.replaceAll(' ', ''))}`,
+  )
+
+  if (field) {
+    setTimeout(() => {
+      field?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 50)
   }
 }
 
-const updateSelectFieldLayout = (value: boolean) => {
-  if (!activeField.value) return
+async function loadReleatedMetas() {
+  await Promise.all(
+    (localColumns.value || []).map(async (c: ColumnType) => {
+      const fk_related_model_id = (c?.colOptions as LinkToAnotherRecordType)?.fk_related_model_id
 
-  activeField.value.meta.isList = value
+      if (isVirtualCol(c) && isLinksOrLTAR(c) && fk_related_model_id) {
+        await getMeta(fk_related_model_id)
+      }
+      return c
+    }),
+  )
+}
+
+const updateActiveFieldDescription = (value) => {
+  if (!activeField.value || activeField.value?.description === value) return
+
+  activeField.value.description = value
   updateColMeta(activeField.value)
 }
 
@@ -644,8 +725,11 @@ onMounted(async () => {
   preFillFormSearchParams.value = ''
 
   isLoadingFormView.value = true
-  await loadFormView()
+
+  await Promise.all([loadFormView(), loadReleatedMetas(), loadAllviewFilters()])
+
   setFormData()
+
   isLoadingFormView.value = false
 })
 
@@ -662,8 +746,8 @@ watch(submitted, (v) => {
   }
 })
 
-watch(view, (nextView) => {
-  if (nextView?.type === ViewTypes.FORM) {
+watch(view, (nextView, oldView) => {
+  if (nextView?.type === ViewTypes.FORM && nextView?.id !== oldView?.id) {
     reloadEventHook.trigger()
   }
 })
@@ -674,31 +758,20 @@ watch(
     for (const virtualField in state.value) {
       formState.value[virtualField] = state.value[virtualField]
     }
-
     updatePreFillFormSearchParams()
 
     try {
-      await formRef.value?.validateFields([...Object.keys(formState.value)])
-    } catch (e: any) {
-      e.errorFields.map((f: Record<string, any>) => console.error(f.errors.join(',')))
-    }
+      await validate(
+        Object.keys(formState.value)
+          .map((title) => fieldMappings.value[title])
+          .filter((v) => v !== undefined),
+      )
+    } catch {}
   },
   {
     deep: true,
   },
 )
-
-const handleAutoScrollFormField = (title: string, isSidebar: boolean) => {
-  const field = document.querySelector(
-    `${isSidebar ? '.nc-form-field-item-' : '.nc-form-drag-'}${CSS.escape(title?.replaceAll(' ', ''))}`,
-  )
-
-  if (field) {
-    setTimeout(() => {
-      field?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }, 50)
-  }
-}
 
 watch(activeField, (newValue, oldValue) => {
   if (newValue && autoScrollFormField.value) {
@@ -720,12 +793,20 @@ watch(activeField, (newValue, oldValue) => {
   }
 })
 
-watch([focusLabel, activeField], () => {
-  if (activeField && focusLabel.value) {
+watch(focusLabel, () => {
+  if (activeField.value && focusLabel.value) {
     nextTick(() => {
       focusLabel.value?.focus()
     })
   }
+})
+
+watch(isLocked, (newValue) => {
+  if (newValue) {
+    activeRow.value = ''
+  }
+
+  clearForm()
 })
 
 useEventListener(
@@ -768,6 +849,11 @@ useEventListener(
     activeRow.value = ''
   },
   true,
+)
+
+const { message: templatedMessage } = useTemplatedMessage(
+  computed(() => formViewData?.value?.success_msg),
+  computed(() => formState.value),
 )
 </script>
 
@@ -821,8 +907,8 @@ useEventListener(
                   <a-alert class="nc-form-success-msg !my-4 !py-4 text-left !rounded-lg" type="success" outlined>
                     <template #message>
                       <LazyCellRichText
-                        v-if="formViewData?.success_msg?.trim()"
-                        :value="formViewData?.success_msg"
+                        v-if="templatedMessage"
+                        :value="templatedMessage"
                         class="!h-auto -ml-1"
                         is-form-field
                         read-only
@@ -896,7 +982,7 @@ useEventListener(
                     />
                     <div class="absolute bottom-0 right-0 hidden group-hover:block">
                       <div class="flex items-center space-x-1 m-2">
-                        <NcTooltip :disabled="isEeUI">
+                        <NcTooltip :disabled="isEeUI || isLocked">
                           <template #title>
                             <div class="text-center">
                               {{ $t('msg.info.thisFeatureIsOnlyAvailableInEnterpriseEdition') }}
@@ -908,7 +994,7 @@ useEventListener(
                             size="small"
                             class="nc-form-upload-banner-btn"
                             data-testid="nc-form-upload-banner-btn"
-                            :disabled="!isEeUI"
+                            :disabled="!isEeUI || isLocked"
                             @click="openUploadImage(true)"
                           >
                             <div class="flex gap-2 items-center">
@@ -920,13 +1006,14 @@ useEventListener(
                             </div>
                           </NcButton>
                         </NcTooltip>
-                        <NcTooltip v-if="isEeUI && formViewData.banner_image_url">
+                        <NcTooltip v-if="isEeUI && formViewData.banner_image_url" :disabled="isLocked">
                           <template #title> {{ $t('general.delete') }} {{ $t('general.banner') }} </template>
                           <NcButton
                             type="secondary"
                             size="small"
                             class="nc-form-delete-banner-btn"
                             data-testid="nc-form-delete-banner-btn"
+                            :disabled="isLocked"
                             @click="
                               () => {
                                 if (isEditable) {
@@ -951,7 +1038,7 @@ useEventListener(
                       padding: '0px !important',
                     }"
                   >
-                    <a-form ref="formRef" :model="formState" class="nc-form" no-style>
+                    <a-form :model="formState" class="nc-form" no-style>
                       <!-- form header -->
                       <div class="flex flex-col px-4 lg:px-6">
                         <!-- Form logo  -->
@@ -965,7 +1052,7 @@ useEventListener(
                             "
                             style="transition: all 0.3s ease-in"
                           >
-                            <LazyCellAttachmentImage
+                            <LazyCellAttachmentPreviewImage
                               v-if="formViewData.logo_url"
                               :key="formViewData.logo_url?.path"
                               :srcs="getFormLogoSrc"
@@ -975,7 +1062,7 @@ useEventListener(
                               class="items-center space-x-1 flex-nowrap m-3"
                               :class="formViewData.logo_url ? 'hidden absolute top-0 left-0 group-hover:flex' : 'flex'"
                             >
-                              <NcTooltip :disabled="isEeUI">
+                              <NcTooltip :disabled="isEeUI || isLocked">
                                 <template #title>
                                   <div class="text-center">
                                     {{ $t('msg.info.thisFeatureIsOnlyAvailableInEnterpriseEdition') }}
@@ -987,7 +1074,7 @@ useEventListener(
                                   size="small"
                                   class="nc-form-upload-logo-btn"
                                   data-testid="nc-form-upload-log-btn"
-                                  :disabled="!isEeUI"
+                                  :disabled="!isEeUI || isLocked"
                                   @click="openUploadImage(false)"
                                 >
                                   <div class="flex gap-2 items-center">
@@ -996,13 +1083,14 @@ useEventListener(
                                   </div>
                                 </NcButton>
                               </NcTooltip>
-                              <NcTooltip v-if="isEeUI && formViewData.logo_url">
+                              <NcTooltip v-if="isEeUI && formViewData.logo_url" :disabled="isLocked">
                                 <template #title> {{ $t('general.delete') }} {{ $t('general.logo') }} </template>
                                 <NcButton
                                   type="secondary"
                                   size="small"
                                   class="nc-form-delete-logo-btn"
                                   data-testid="nc-form-delete-logo-btn"
+                                  :disabled="isLocked"
                                   @click="
                               () => {
                                 if (isEditable) {
@@ -1062,7 +1150,7 @@ useEventListener(
                               :bordered="false"
                               :data-testid="NcForm.heading"
                               :data-title="NcForm.heading"
-                              @update:value="updateView"
+                              @input="updateView"
                               @focus="activeRow = NcForm.heading"
                               @blur="activeRow = ''"
                             />
@@ -1075,7 +1163,7 @@ useEventListener(
 
                         <!-- form description  -->
                         <div
-                          class="border-transparent px-4 lg:px-6"
+                          class="border-transparent px-4 lg:px-6 empty:hidden"
                           :class="[
                             {
                               'rounded-2xl border-2 cursor-pointer mb-1 py-4 lg:py-6 focus-within:bg-gray-50': isEditable,
@@ -1104,6 +1192,7 @@ useEventListener(
                             :autofocus="activeRow === NcForm.subheading"
                             :data-testid="NcForm.subheading"
                             :data-title="NcForm.subheading"
+                            hide-mention
                             @update:value="updateView"
                             @focus="activeRow = NcForm.subheading"
                             @blur="activeRow = ''"
@@ -1134,6 +1223,7 @@ useEventListener(
                       >
                         <template #item="{ element }">
                           <div
+                            v-if="!isLocked || (isLocked && element?.visible)"
                             :key="element.id"
                             class="nc-editable nc-form-focus-element item relative bg-white p-4 lg:p-6"
                             :class="[
@@ -1172,13 +1262,34 @@ useEventListener(
                                 />
                               </NcButton>
                             </div>
-                            <div class="text-sm font-semibold text-gray-800">
-                              <span data-testid="nc-form-input-label">
-                                {{ element.label || element.title }}
-                              </span>
-                              <span v-if="isRequired(element, element.required)" class="text-red-500 text-base leading-[18px]"
-                                >&nbsp;*</span
+                            <div class="flex items-center gap-3">
+                              <NcTooltip
+                                v-if="allViewFilters[element.fk_column_id]?.length && !isLocked"
+                                class="relative h-3.5 w-3.5 flex cursor-pointer"
+                                placement="topLeft"
                               >
+                                <template #title> Conditionally visible field </template>
+                                <Transition name="icon-fade" :duration="500">
+                                  <GeneralIcon
+                                    v-if="element?.visible"
+                                    icon="eye"
+                                    class="nc-field-visibility-icon nc-field-visible w-3.5 h-3.5 flex-none text-nc-content-gray-muted"
+                                  />
+                                  <GeneralIcon
+                                    v-else
+                                    icon="eyeSlash"
+                                    class="nc-field-visibility-icon w-3.5 h-3.5 flex-none text-nc-content-gray-muted"
+                                  />
+                                </Transition>
+                              </NcTooltip>
+                              <div class="text-sm font-semibold text-gray-800">
+                                <span data-testid="nc-form-input-label">
+                                  {{ element.label || element.title }}
+                                </span>
+                                <span v-if="isRequired(element, element.required)" class="text-red-500 text-base leading-[18px]"
+                                  >&nbsp;*</span
+                                >
+                              </div>
                             </div>
 
                             <LazyCellRichText
@@ -1197,9 +1308,10 @@ useEventListener(
                             <div class="nc-form-field-body">
                               <div class="mt-2">
                                 <a-form-item
-                                  :name="element.title"
+                                  v-if="fieldMappings[element.title]"
+                                  :name="fieldMappings[element.title]"
                                   class="!my-0 nc-input-required-error nc-form-input-item"
-                                  :rules="formElementValidationRules(element)"
+                                  v-bind="validateInfos[fieldMappings[element.title]]"
                                 >
                                   <LazySmartsheetDivDataCell class="relative" @click.stop>
                                     <LazySmartsheetVirtualCell
@@ -1225,6 +1337,10 @@ useEventListener(
                                     />
                                   </LazySmartsheetDivDataCell>
                                 </a-form-item>
+
+                                <div>
+                                  <LazySmartsheetFormFieldConfigError :column="element" mode="preview" />
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -1254,7 +1370,6 @@ useEventListener(
                         </NcButton>
 
                         <NcButton
-                          html-type="submit"
                           type="primary"
                           size="small"
                           :disabled="!isUIAllowed('dataInsert') || !visibleColumns.length"
@@ -1269,7 +1384,7 @@ useEventListener(
                     </a-form>
 
                     <div v-if="!parseProp(formViewData?.meta).hide_branding" class="px-8 lg:px-12">
-                      <a-divider v-if="!isLocked" class="!my-8" />
+                      <a-divider class="!my-8" />
                       <!-- Nocodb Branding  -->
                       <div class="inline-block">
                         <GeneralFormBranding />
@@ -1285,10 +1400,11 @@ useEventListener(
                 class="nc-form-right-panel h-full flex-grow max-w-full"
                 :class="{
                   'overflow-y-auto nc-form-scrollbar': activeField,
+                  'relative': isLocked,
                 }"
               >
                 <!-- Form Field settings -->
-                <div v-if="activeField && activeColumn" :key="activeField?.id">
+                <div v-if="activeField && activeColumn" :key="activeField?.id" class="nc-form-field-right-panel">
                   <!-- Field header -->
                   <div class="px-3 pt-4 pb-2 flex items-center justify-between border-b border-gray-200 font-medium">
                     <div class="flex items-center">
@@ -1323,20 +1439,24 @@ useEventListener(
                         v-model:visible="dropdownStates.showEditColumn"
                         :trigger="['click']"
                         overlay-class-name="nc-dropdown-form-edit-column"
-                        :disabled="!isUIAllowed('fieldEdit')"
+                        :disabled="!isUIAllowed('fieldEdit') || isLocked"
+                        @visible-change="onVisibilityChange('showEditColumn')"
                       >
                         <NcButton type="secondary" size="small" class="nc-form-add-field" data-testid="nc-form-add-field">
                           {{ $t('general.edit') }} {{ $t('objects.field') }}
                         </NcButton>
                         <template #overlay>
-                          <SmartsheetColumnEditOrAddProvider
-                            v-if="dropdownStates.showEditColumn"
-                            :column="activeColumn"
-                            @submit="editColumnCallback"
-                            @cancel="dropdownStates.showEditColumn = false"
-                            @click.stop
-                            @keydown.stop
-                          />
+                          <div class="nc-edit-or-add-provider-wrapper">
+                            <LazySmartsheetColumnEditOrAddProvider
+                              v-if="dropdownStates.showEditColumn"
+                              ref="editOrAddProviderRef"
+                              :column="activeColumn"
+                              @submit="editColumnCallback"
+                              @cancel="dropdownStates.showEditColumn = false"
+                              @click.stop
+                              @keydown.stop
+                            />
+                          </div>
                         </template>
                       </a-dropdown>
                       <SmartsheetFormFieldMenu
@@ -1353,14 +1473,15 @@ useEventListener(
                       />
                     </div>
                   </div>
-
                   <!-- Field text -->
                   <div class="nc-form-field-text p-4 flex flex-col gap-4 border-b border-gray-200">
-                    <div class="text-base font-bold">{{ $t('objects.field') }} {{ $t('general.text') }}</div>
+                    <div class="text-sm font-bold text-gray-800">
+                      {{ $t('objects.field') }} {{ $t('general.text').toLowerCase() }}
+                    </div>
 
                     <a-textarea
                       ref="focusLabel"
-                      :value="activeField.label || activeField.title"
+                      :value="activeFieldLabel"
                       :rows="1"
                       auto-size
                       hide-details
@@ -1368,127 +1489,33 @@ useEventListener(
                       data-testid="nc-form-input-label"
                       :placeholder="$t('msg.info.formInput')"
                       @focus="onFocusActiveFieldLabel"
+                      @blur="isFocusedFieldLabel = false"
                       @keydown.enter.prevent
-                      @update:value="updateFieldTitle"
+                      @input="updateFieldTitle($event.target.value)"
                       @change="updateColMeta(activeField)"
                     />
 
                     <LazyCellRichText
-                      v-model:value="activeField.description"
+                      :value="activeField.description"
                       :placeholder="$t('msg.info.formHelpText')"
                       class="form-meta-input nc-form-input-help-text"
                       is-form-field
                       :hidden-bubble-menu-options="hiddenBubbleMenuOptions"
+                      hide-mention
                       data-testid="nc-form-input-help-text"
-                      @update:value="updateColMeta(activeField)"
+                      @update:value="updateActiveFieldDescription"
                     />
                   </div>
-
-                  <!-- Field Settings -->
-                  <div class="nc-form-field-settings p-4 flex flex-col gap-4 border-b border-gray-200">
-                    <div class="text-base font-bold">{{ $t('objects.field') }} {{ $t('activity.settings') }}</div>
-                    <div class="flex flex-col gap-6">
-                      <div class="flex items-center justify-between gap-3">
-                        <div class="nc-form-input-required text-gray-800 font-medium">
-                          {{ $t('general.required') }} {{ $t('objects.field').toLowerCase() }}
-                        </div>
-
-                        <a-switch
-                          v-model:checked="activeField.required"
-                          v-e="['a:form-view:field:mark-required']"
-                          size="small"
-                          data-testid="nc-form-input-required"
-                          @change="updateColMeta(activeField)"
-                        />
-                      </div>
-
-                      <div v-if="columnSupportsScanning(activeField.uidt)" class="!my-0 nc-form-input-enable-scanner-form-item">
-                        <div class="flex items-center justify-between gap-3">
-                          <div class="nc-form-input-enable-scanner text-gray-800 font-medium">
-                            {{ $t('general.enableScanner') }}
-                          </div>
-                          <a-switch
-                            v-model:checked="activeField.enable_scanner"
-                            v-e="['a:form-view:field:mark-enable-scanner']"
-                            data-testid="nc-form-input-enable-scanner"
-                            size="small"
-                            @change="updateColMeta(activeField)"
-                          />
-                        </div>
-                      </div>
-
-                      <!-- Todo: Show on conditions,... -->
-                      <!-- eslint-disable vue/no-constant-condition -->
-                      <div v-if="false" class="flex items-start justify-between gap-3">
-                        <div>
-                          <div class="font-medium text-gray-800">{{ $t('labels.showOnConditions') }}</div>
-                          <div class="text-gray-500 mt-2">{{ $t('labels.showFieldOnConditionsMet') }}</div>
-                        </div>
-                        <a-switch v-e="['a:form-view:field:show-on-condition']" size="small" class="nc-form-switch-focus" />
-                      </div>
-
-                      <!-- Limit options -->
-                      <div v-if="isSelectTypeCol(activeField.uidt)" class="w-full flex items-start justify-between gap-3">
-                        <div class="flex-1 max-w-[calc(100%_-_40px)]">
-                          <div class="font-medium text-gray-800">{{ $t('labels.limitOptions') }}</div>
-                          <div class="text-gray-500 mt-2">{{ $t('labels.limitOptionsSubtext') }}.</div>
-                          <div v-if="activeField.meta.isLimitOption" class="mt-3">
-                            <LazySmartsheetFormLimitOptions
-                              v-model:model-value="activeField.meta.limitOptions"
-                              :form-field-state="formState[activeField.title] || ''"
-                              :column="activeField"
-                              :is-required="isRequired(activeField, activeField.required)"
-                              @update:model-value="updateColMeta(activeField)"
-                              @update:form-field-state="(value)=>{
-                                  formState[activeField!.title] = value
-                                }"
-                            ></LazySmartsheetFormLimitOptions>
-                          </div>
-                        </div>
-
-                        <a-switch
-                          v-model:checked="activeField.meta.isLimitOption"
-                          v-e="['a:form-view:field:limit-options']"
-                          size="small"
-                          class="flex-none nc-form-switch-focus"
-                          @change="updateColMeta(activeField)"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Field Appearance Settings -->
-
-                  <div
-                    v-if="isSelectTypeCol(activeField.uidt)"
-                    class="nc-form-field-appearance-settings p-4 flex flex-col gap-4 border-b border-gray-200"
-                  >
-                    <div class="text-base font-bold">{{ $t('general.appearance') }}</div>
-                    <div class="flex flex-col gap-6">
-                      <!-- Select type field Options Layout  -->
-                      <div>
-                        <div class="text-gray-800 font-medium">Options layout</div>
-
-                        <a-radio-group
-                          :value="!!activeField.meta.isList"
-                          class="nc-form-field-layout !mt-3 max-w-[calc(100%_-_40px)]"
-                          @update:value="updateSelectFieldLayout"
-                        >
-                          <a-radio :value="false">{{ $t('general.dropdown') }}</a-radio>
-                          <a-radio :value="true">{{ $t('general.list') }}</a-radio>
-                        </a-radio-group>
-                      </div>
-                    </div>
-                  </div>
+                  <LazySmartsheetFormFieldSettings v-if="activeField"></LazySmartsheetFormFieldSettings>
                 </div>
 
                 <!-- Form Settings -->
                 <template v-else>
-                  <Splitpanes v-if="formViewData" horizontal class="w-full nc-form-right-splitpane">
+                  <Splitpanes v-if="formViewData" horizontal class="nc-form-settings w-full nc-form-right-splitpane">
                     <Pane min-size="30" size="50" class="nc-form-right-splitpane-item p-4 flex flex-col space-y-4 !min-h-200px">
                       <div class="flex flex-wrap justify-between items-center gap-2">
-                        <div class="flex gap-3">
-                          <div class="text-base font-bold text-gray-900">
+                        <div class="flex items-center gap-3">
+                          <div class="text-sm font-bold text-gray-800">
                             {{ $t('objects.viewType.form') }} {{ $t('objects.fields') }}
                           </div>
                           <NcBadge color="border-gray-200">
@@ -1500,7 +1527,9 @@ useEventListener(
                           v-if="isUIAllowed('fieldAdd')"
                           v-model:visible="dropdownStates.showAddColumn"
                           :trigger="['click']"
+                          :disabled="isLocked"
                           overlay-class-name="nc-dropdown-form-add-column"
+                          @visible-change="onVisibilityChange('showAddColumn')"
                         >
                           <NcButton type="secondary" size="small" class="nc-form-add-field" data-testid="nc-form-add-field">
                             <div class="flex gap-2 items-center">
@@ -1510,13 +1539,16 @@ useEventListener(
                           </NcButton>
 
                           <template #overlay>
-                            <SmartsheetColumnEditOrAddProvider
-                              v-if="dropdownStates.showAddColumn"
-                              @submit="addColumnCallback"
-                              @cancel="dropdownStates.showAddColumn = false"
-                              @click.stop
-                              @keydown.stop
-                            />
+                            <div class="nc-edit-or-add-provider-wrapper">
+                              <LazySmartsheetColumnEditOrAddProvider
+                                v-if="dropdownStates.showAddColumn"
+                                ref="editOrAddProviderRef"
+                                @submit="addColumnCallback"
+                                @cancel="dropdownStates.showAddColumn = false"
+                                @click.stop
+                                @keydown.stop
+                              />
+                            </div>
                           </template>
                         </a-dropdown>
                       </div>
@@ -1554,7 +1586,7 @@ useEventListener(
                         <template v-if="localColumns.length">
                           <div
                             key="nc-form-show-all-fields"
-                            class="w-full flex items-center border-b-1 rounded-t-lg border-gray-200 bg-gray-50 sticky top-0 z-100"
+                            class="w-full flex items-center border-b-1 rounded-t-lg border-gray-200 bg-gray-50 sticky top-0 z-49"
                             data-testid="nc-form-show-all-fields"
                             @click.stop
                           >
@@ -1566,6 +1598,7 @@ useEventListener(
                                   :checked="visibleColumns.length === localColumns.length"
                                   size="small"
                                   class="nc-switch"
+                                  :disabled="isLocked"
                                   @change="handleAddOrRemoveAllColumns"
                                 />
                               </div>
@@ -1602,8 +1635,12 @@ useEventListener(
                                     class="flex-1 flex items-center cursor-pointer max-w-[calc(100%_-_40px)]"
                                     @click.prevent="onFormItemClick(field, true)"
                                   >
-                                    <SmartsheetHeaderVirtualCellIcon v-if="field && isVirtualCol(field)" :column-meta="field" />
-                                    <SmartsheetHeaderCellIcon v-else :column-meta="field" />
+                                    <SmartsheetHeaderVirtualCellIcon
+                                      v-if="field && isVirtualCol(field)"
+                                      :column-meta="field"
+                                      class="!text-gray-600"
+                                    />
+                                    <SmartsheetHeaderCellIcon v-else :column-meta="field" class="!text-gray-600" />
                                     <div class="flex-1 flex items-center justify-start max-w-[calc(100%_-_28px)]">
                                       <div class="w-full flex items-center">
                                         <div class="ml-1 inline-flex" :class="field.label?.trim() ? 'max-w-1/2' : 'max-w-[95%]'">
@@ -1617,7 +1654,7 @@ useEventListener(
                                           </NcTooltip>
                                         </div>
                                         <div
-                                          v-if="field.label?.trim()"
+                                          v-if="field.label?.trim() && field.title !== field.label?.trim()"
                                           class="truncate inline-flex text-xs font-normal text-gray-700"
                                         >
                                           <span>&nbsp;(</span>
@@ -1631,24 +1668,35 @@ useEventListener(
                                           </NcTooltip>
                                           <span>)</span>
                                         </div>
-                                        <span v-if="isRequired(field, field.required)" class="text-red-500 text-sm align-top"
-                                          >&nbsp;*</span
-                                        >
+
+                                        <span v-if="isRequired(field, field.required)" class="text-red-500 text-sm align-top">
+                                          &nbsp;*
+                                        </span>
+                                        <div class="flex items-center">
+                                          <LazySmartsheetFormFieldConfigError :column="field" mode="list" />
+                                        </div>
                                       </div>
                                     </div>
                                   </div>
 
-                                  <a-switch
-                                    :checked="!!field.show"
-                                    :disabled="field.required || isLocked || !isEditable"
-                                    class="flex-none nc-switch"
-                                    size="small"
-                                    @change="
-                                      (value) => {
-                                        showOrHideColumn(field, value, true)
-                                      }
-                                    "
-                                  />
+                                  <NcTooltip
+                                    :disabled="!field.required || isLocked || !isEditable"
+                                    class="flex"
+                                    placement="topRight"
+                                  >
+                                    <template #title> You can't hide a required field.</template>
+                                    <a-switch
+                                      :checked="!!field.show"
+                                      :disabled="field.required || isLocked || !isEditable"
+                                      class="flex-none nc-switch"
+                                      size="small"
+                                      @change="
+                                        (value) => {
+                                          showOrHideColumn(field, value, true)
+                                        }
+                                      "
+                                    />
+                                  </NcTooltip>
                                 </div>
                               </div>
                             </template>
@@ -1669,7 +1717,7 @@ useEventListener(
                     <Pane min-size="20" size="50" class="nc-form-right-splitpane-item !overflow-y-auto nc-form-scrollbar">
                       <div class="p-4 flex flex-col space-y-4 border-b border-gray-200">
                         <!-- Appearance Settings -->
-                        <div class="text-base font-bold text-gray-900">{{ $t('labels.appearanceSettings') }}</div>
+                        <div class="text-sm font-bold text-gray-800">{{ $t('labels.appearanceSettings') }}</div>
 
                         <div class="flex flex-col space-y-3">
                           <div :class="isLocked || !isEditable ? 'pointer-events-none' : ''">
@@ -1709,14 +1757,12 @@ useEventListener(
                               class="nc-form-hide-branding"
                               data-testid="nc-form-hide-branding"
                               :disabled="isLocked || !isEditable"
-                              @change="
-                      (value) => {
-                        if (isLocked || !isEditable) return
+                              @change="(value) => {
+                                  if (isLocked || !isEditable) return
 
-                        (formViewData!.meta as Record<string,any>).hide_branding = value
-                        updateView()
-                      }
-                    "
+                                  (formViewData!.meta as Record<string,any>).hide_branding = value
+                                  updateView()
+                                }"
                             />
 
                             <NcTooltip v-else placement="top">
@@ -1738,14 +1784,12 @@ useEventListener(
                               class="nc-form-hide-banner"
                               data-testid="nc-form-hide-banner"
                               :disabled="isLocked || !isEditable"
-                              @change="
-                      (value) => {
-                        if (isLocked || !isEditable) return
+                              @change="(value) => {
+                                  if (isLocked || !isEditable) return
 
-                        (formViewData!.meta as Record<string,any>).hide_banner = value
-                        updateView()
-                      }
-                    "
+                                  (formViewData!.meta as Record<string,any>).hide_banner = value
+                                  updateView()
+                                }"
                             />
                           </div>
                         </div>
@@ -1753,44 +1797,84 @@ useEventListener(
 
                       <div class="p-4 flex flex-col space-y-4">
                         <!-- Post Form Submission Settings -->
-                        <div class="text-base font-bold text-gray-900">
+                        <div class="text-sm font-bold text-gray-800">
                           {{ $t('msg.info.postFormSubmissionSettings') }}
                         </div>
 
                         <div class="flex flex-col gap-3">
-                          <div class="flex items-center justify-between gap-3">
-                            <!-- Show "Submit Another Form" button -->
-                            <span>{{ $t('msg.info.submitAnotherForm') }}</span>
-                            <a-switch
-                              v-model:checked="formViewData.submit_another_form"
-                              v-e="[`a:form-view:submit-another-form`]"
-                              size="small"
-                              class="nc-form-checkbox-submit-another-form"
-                              data-testid="nc-form-checkbox-submit-another-form"
-                              :disabled="isLocked || !isEditable"
-                              @change="updateView"
-                            />
+                          <div class="flex flex-col gap-3">
+                            <div class="flex items-center justify-between gap-3">
+                              <!-- Redirect to URL -->
+                              <span>{{ $t('labels.redirectToUrl') }}</span>
+                              <a-switch
+                                v-model:checked="isOpenRedirectUrl"
+                                v-e="[`a:form-view:redirect-url`]"
+                                size="small"
+                                class="nc-form-checkbox-redirect-url"
+                                data-testid="nc-form-checkbox-redirect-url"
+                                :disabled="isLocked || !isEditable"
+                                @change="updateView"
+                              />
+                            </div>
+                            <div v-if="isOpenRedirectUrl" class="flex flex-col gap-2 max-w-[calc(100%_-_40px)]">
+                              <a-form-item class="!my-0" v-bind="redirectLinkValidation">
+                                <a-input
+                                  v-model:value="formViewData.redirect_url"
+                                  type="text"
+                                  class="!h-8 !px-3 !py-1 !rounded-lg"
+                                  placeholder="Paste redirect URL here"
+                                  data-testid="nc-form-redirect-url-input"
+                                  @input="handleUpdateRedirectUrl"
+                                ></a-input>
+                              </a-form-item>
+                              <div class="text-small leading-[18px] text-gray-400 pl-3">
+                                Use {record_id} to get ID of the newly created record.
+                                <a
+                                  href="https://docs.nocodb.com/views/view-types/form/#redirect-url"
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  class="!no-underline !hover:underline"
+                                >
+                                  Learn more
+                                </a>
+                              </div>
+                            </div>
                           </div>
+                          <template v-if="!isOpenRedirectUrl">
+                            <div class="flex items-center justify-between gap-3">
+                              <!-- Show "Submit Another Form" button -->
+                              <span>{{ $t('msg.info.submitAnotherForm') }}</span>
+                              <a-switch
+                                v-model:checked="formViewData.submit_another_form"
+                                v-e="[`a:form-view:submit-another-form`]"
+                                size="small"
+                                class="nc-form-checkbox-submit-another-form"
+                                data-testid="nc-form-checkbox-submit-another-form"
+                                :disabled="isLocked || !isEditable"
+                                @change="updateView"
+                              />
+                            </div>
 
-                          <div class="flex items-center justify-between gap-3">
-                            <!-- Show a blank form after 5 seconds -->
-                            <span>{{ $t('msg.info.showBlankForm') }}</span>
-                            <a-switch
-                              v-model:checked="formViewData.show_blank_form"
-                              v-e="[`a:form-view:show-blank-form`]"
-                              size="small"
-                              class="nc-form-checkbox-show-blank-form"
-                              data-testid="nc-form-checkbox-show-blank-form"
-                              :disabled="isLocked || !isEditable"
-                              @change="updateView"
-                            />
-                          </div>
+                            <div class="flex items-center justify-between gap-3">
+                              <!-- Show a blank form after 5 seconds -->
+                              <span>{{ $t('msg.info.showBlankForm') }}</span>
+                              <a-switch
+                                v-model:checked="formViewData.show_blank_form"
+                                v-e="[`a:form-view:show-blank-form`]"
+                                size="small"
+                                class="nc-form-checkbox-show-blank-form"
+                                data-testid="nc-form-checkbox-show-blank-form"
+                                :disabled="isLocked || !isEditable"
+                                @change="updateView"
+                              />
+                            </div>
+                          </template>
 
                           <div class="flex items-center justify-between gap-3">
                             <!-- Email me at <email> -->
                             <span>
                               {{ $t('msg.info.emailForm') }}
-                              <span class="text-bold text-gray-600">{{ user?.email }}</span>
+                              <span class="text-bold text-gray-600 underline">{{ user?.email }}</span>
                             </span>
                             <a-switch
                               v-model:checked="emailMe"
@@ -1805,17 +1889,24 @@ useEventListener(
                         </div>
 
                         <!-- Show this message -->
-                        <div class="pb-10">
-                          <div class="text-gray-800 mb-2">
+                        <div v-if="!isOpenRedirectUrl" class="pb-10">
+                          <div class="text-gray-800 mb-2 flex items-center">
                             {{ $t('msg.info.formDisplayMessage') }}
+                            <NcTooltip>
+                              <template #title>
+                                Use column name/title for templated field instead of field label. For example: "Hello {Title}!"
+                              </template>
+                              <GeneralIcon icon="info" class="text-gray-400 ml-1" />
+                            </NcTooltip>
                           </div>
                           <a-form-item class="!my-0">
                             <LazyCellRichText
                               v-if="!isLocked && isEditable"
                               v-model:value="formViewData.success_msg"
-                              class="nc-form-after-submit-msg"
+                              class="nc-form-after-submit-msg editable"
                               is-form-field
                               :hidden-bubble-menu-options="hiddenBubbleMenuOptions"
+                              hide-mention
                               data-testid="nc-form-after-submit-msg"
                               @update:value="updateView" />
                             <LazyCellRichText
@@ -1831,6 +1922,10 @@ useEventListener(
                     </Pane>
                   </Splitpanes>
                 </template>
+
+                <div v-if="isLocked" class="absolute inset-0 bg-black/12 z-500 grid place-items-center px-6">
+                  <LazyDlgLockView />
+                </div>
               </div>
             </template>
           </SmartsheetFormLayout>
@@ -1865,12 +1960,14 @@ useEventListener(
 .nc-input {
   @apply appearance-none w-full;
   &:not(.layout-list) {
-    @apply !bg-white rounded-lg border-solid border-1 border-gray-200 !focus-within:border-brand-500;
+    &:not(.nc-cell-attachment) {
+      @apply !bg-white rounded-lg border-solid border-1 border-gray-200 !focus-within:border-brand-500;
+    }
   }
   &.layout-list {
     @apply h-auto !pl-0 !py-1;
   }
-  &.nc-cell-rating,
+
   &.nc-cell-geodata {
     @apply !py-1;
   }
@@ -1879,8 +1976,11 @@ useEventListener(
   }
 
   :deep(input) {
-    @apply !px-1;
+    &:not(.ant-select-selection-search-input) {
+      @apply !px-1;
+    }
   }
+
   &.nc-cell-longtext {
     @apply p-0 h-auto;
   }
@@ -1888,11 +1988,11 @@ useEventListener(
     @apply p-2;
   }
   &.nc-virtual-cell {
-    @apply px-2 py-1;
+    @apply px-2 py-1 min-h-10;
   }
 
   &.nc-cell-json {
-    @apply h-auto;
+    @apply min-h-[38px] h-auto;
     & > div {
       @apply w-full;
     }
@@ -1915,7 +2015,16 @@ useEventListener(
   max-width: 100%;
   white-space: pre-line;
   :deep(.ant-form-item-explain-error) {
-    @apply mt-2;
+    &:first-child {
+      @apply mt-2;
+    }
+  }
+}
+.nc-input-required-error {
+  &:focus-within {
+    :deep(.ant-form-item-explain-error) {
+      @apply text-gray-400;
+    }
   }
 }
 :deep(.ant-form-item-has-error .ant-select:not(.ant-select-disabled) .ant-select-selector) {
@@ -1958,7 +2067,7 @@ useEventListener(
   @apply !border-t-1 !border-gray-200 relative;
 
   &::before {
-    @apply content-[':::'] block h-4 leading-12px px-2 font-bold text-gray-800 border-1 border-gray-200 rounded bg-white absolute -top-2.5 z-100 left-[calc(50%_-_16px)];
+    @apply content-[':::'] block h-4 leading-12px px-2 font-bold text-gray-800 border-1 border-gray-200 rounded bg-white absolute -top-2.5 z-49 left-[calc(50%_-_16px)];
   }
 }
 
@@ -2004,6 +2113,13 @@ useEventListener(
 .form-meta-input {
   .nc-textarea-rich-editor {
     @apply pl-3 pr-4 !rounded-lg !text-sm border-1 border-gray-200 focus-within:border-brand-500;
+
+    &:hover {
+      @apply border-brand-400;
+    }
+    &:focus-within {
+      @apply shadow-selected;
+    }
   }
 
   &.nc-form-input-label .nc-textarea-rich-editor {
@@ -2017,8 +2133,20 @@ useEventListener(
   }
 }
 .nc-form-after-submit-msg {
+  .editable {
+    .nc-textarea-rich-editor {
+      &:hover {
+        @apply border-brand-400;
+      }
+    }
+  }
   .nc-textarea-rich-editor {
     @apply pl-1 pr-2 pt-2 pb-1 !rounded-lg !text-sm border-1 border-gray-200 focus-within:border-brand-500;
+
+    &:focus-within {
+      @apply shadow-selected;
+    }
+
     .ProseMirror {
       min-height: 5rem;
       max-height: 7.5rem !important;

@@ -17,7 +17,7 @@ const ncLinksDropdownRef = ref<HTMLDivElement>()
 
 const randomClass = `link-records_${Math.floor(Math.random() * 99999)}`
 
-const addOrRemoveClass = (add: boolean = false) => {
+const addOrRemoveClass = (add = false) => {
   const dropdownRoot = ncLinksDropdownRef.value?.parentElement?.parentElement?.parentElement?.parentElement as HTMLElement
   if (dropdownRoot) {
     if (add) {
@@ -63,12 +63,12 @@ watch([ncLinksDropdownRef, isOpen], () => {
   <NcDropdown
     :visible="isOpen"
     placement="bottom"
-    overlay-class-name="nc-links-dropdown !min-w-[540px]"
+    :overlay-class-name="`nc-links-dropdown !min-w-[540px] xs:(!min-w-[90vw]) ${isOpen ? 'active' : ''}`"
     :class="`.nc-${randomClass}`"
   >
     <slot />
     <template #overlay>
-      <div ref="ncLinksDropdownRef" class="h-[412px] w-[540px] nc-links-dropdown-wrapper" :class="`${randomClass}`">
+      <div ref="ncLinksDropdownRef" class="nc-links-dropdown-wrapper" :class="`${randomClass}`">
         <slot name="overlay" />
       </div>
     </template>
@@ -85,7 +85,7 @@ watch([ncLinksDropdownRef, isOpen], () => {
 }
 
 .nc-links-dropdown-wrapper {
-  @apply h-[412px] w-[540px];
+  @apply h-[412px] w-[540px] xs:(w-[90vw] min-h-[312px] h-[312px]);
   overflow-y: auto;
   overflow-x: hidden;
   resize: vertical;

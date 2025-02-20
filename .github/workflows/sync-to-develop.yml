@@ -1,4 +1,4 @@
-name: 'Sync changes back to develop branch from master'
+name: "Sync changes back to develop branch from master"
 
 on:
   # Triggered manually
@@ -7,16 +7,16 @@ on:
   workflow_call:
 jobs:
   sync-to-develop:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Setup Node
         uses: actions/setup-node@v3
         with:
-          node-version: 18.19.1
+          node-version: 22.12.0
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2
+        uses: pnpm/action-setup@v4
         with:
-          version: 8
+          version: 9
       - name: Checkout
         uses: actions/checkout@v3
         with:
@@ -37,13 +37,15 @@ jobs:
           cd nocodb
           git fetch --quiet --unshallow origin
           git checkout master
+          # reset to origin/master
+          git reset --hard origin/master
           : # Use the first 8 characters of the latest commit hash as the branch name
           BRANCH_NAME=nc/$(git rev-list -n 1 HEAD | cut -c1-8)
           git checkout -b $BRANCH_NAME
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
           revertSDK=true node scripts/upgradeNocodbSdk.js
-          pnpm bootstrap
+          pnpm --filter=nocodb-sdk install --no-frozen-lockfile && pnpm --filter=nocodb-sdk run build && pnpm --filter=nocodb --filter=nc-gui --filter=playwright install --no-frozen-lockfile
           git add .
           git diff-index --quiet HEAD || git commit -m "chore: update sdk path"
           git push origin $BRANCH_NAME
