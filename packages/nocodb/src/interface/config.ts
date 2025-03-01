@@ -1,10 +1,7 @@
-import type { UserType } from 'nocodb-sdk';
-import type { ReqId } from 'pino-http';
 import type { Handler } from 'express';
 import type * as e from 'express';
 import type { Knex } from 'knex';
-import type { User } from '~/models';
-import type { IncomingHttpHeaders } from 'http';
+import type { NcContext, NcRequest } from 'nocodb-sdk';
 
 export interface Route {
   path: string;
@@ -301,14 +298,17 @@ export interface AppConfig {
     data?: {
       ttl: number;
       max_apis: number;
+      block_duration: number;
     };
     meta?: {
       ttl: number;
       max_apis: number;
+      block_duration: number;
     };
     public?: {
       ttl: number;
       max_apis: number;
+      block_duration: number;
     };
     calc_execution_time: boolean;
   };
@@ -324,11 +324,4 @@ export interface AppConfig {
   dashboardPath: string;
 }
 
-export interface NcRequest {
-  id?: ReqId;
-  user?: UserType | User;
-  ncWorkspaceId?: string;
-  ncBaseId?: string;
-  headers?: Record<string, string | undefined> | IncomingHttpHeaders;
-  clientIp?: string;
-}
+export { NcContext, NcRequest };

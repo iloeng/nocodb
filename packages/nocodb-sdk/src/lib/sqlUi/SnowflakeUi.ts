@@ -1,5 +1,7 @@
 import UITypes from '../UITypes';
 import { IDType } from './index';
+import { ColumnType } from '~/lib';
+import { SqlUi } from './SqlUI.types';
 
 const dbTypes = [
   'NUMBER',
@@ -38,7 +40,8 @@ const dbTypes = [
   'GEOGRAPHY',
 ];
 
-export class SnowflakeUi {
+export class SnowflakeUi implements SqlUi {
+  //#region statics
   static getNewTableColumns() {
     return [
       {
@@ -67,9 +70,9 @@ export class SnowflakeUi {
       {
         column_name: 'title',
         title: 'Title',
-        dt: 'varchar',
+        dt: 'TEXT',
         dtx: 'specificType',
-        ct: 'varchar(45)',
+        ct: null,
         nrqd: true,
         rqd: false,
         ck: false,
@@ -77,10 +80,10 @@ export class SnowflakeUi {
         un: false,
         ai: false,
         cdf: null,
-        clen: 45,
+        clen: null,
         np: null,
         ns: null,
-        dtxp: '45',
+        dtxp: '',
         dtxs: '',
         altered: 1,
         uidt: 'SingleLineText',
@@ -179,15 +182,39 @@ export class SnowflakeUi {
         uicn: '',
         system: true,
       },
+      {
+        column_name: 'nc_order',
+        title: 'nc_order',
+        dt: 'number',
+        dtx: 'specificType',
+        ct: 'number(38,18)',
+        nrqd: true,
+        rqd: false,
+        ck: false,
+        pk: false,
+        un: false,
+        ai: false,
+        cdf: null,
+        clen: null,
+        np: 38,
+        ns: 18,
+        dtxp: '38,18',
+        dtxs: '',
+        altered: 1,
+        uidt: UITypes.Order,
+        uip: '',
+        uicn: '',
+        system: true,
+      },
     ];
   }
 
   static getNewColumn(suffix) {
     return {
       column_name: 'title' + suffix,
-      dt: 'varchar',
+      dt: 'TEXT',
       dtx: 'specificType',
-      ct: 'varchar(45)',
+      ct: null,
       nrqd: true,
       rqd: false,
       ck: false,
@@ -195,10 +222,10 @@ export class SnowflakeUi {
       un: false,
       ai: false,
       cdf: null,
-      clen: 45,
+      clen: null,
       np: null,
       ns: null,
-      dtxp: '45',
+      dtxp: '',
       dtxs: '',
       altered: 1,
       uidt: 'SingleLineText',
@@ -707,7 +734,7 @@ export class SnowflakeUi {
     }
   }
 
-  static getDataTypeForUiType(col: { uidt: UITypes; }, idType?: IDType) {
+  static getDataTypeForUiType(col: { uidt: UITypes }, idType?: IDType) {
     const colProp: any = {};
     switch (col.uidt) {
       case 'ID':
@@ -726,7 +753,7 @@ export class SnowflakeUi {
         colProp.dt = 'VARCHAR';
         break;
       case 'SingleLineText':
-        colProp.dt = 'VARCHAR';
+        colProp.dt = 'TEXT';
         break;
       case 'LongText':
         colProp.dt = 'TEXT';
@@ -776,7 +803,7 @@ export class SnowflakeUi {
         };
         break;
       case 'URL':
-        colProp.dt = 'VARCHAR';
+        colProp.dt = 'TEXT';
         colProp.validate = {
           func: ['isURL'],
           args: [''],
@@ -847,7 +874,7 @@ export class SnowflakeUi {
     return colProp;
   }
 
-  static getDataTypeListForUiType(col: { uidt: UITypes; }, idType: IDType) {
+  static getDataTypeListForUiType(col: { uidt: UITypes }, idType: IDType) {
     switch (col.uidt) {
       case 'ID':
         if (idType === 'AG') {
@@ -864,10 +891,10 @@ export class SnowflakeUi {
       case 'LongText':
       case 'Collaborator':
       case 'GeoData':
-        return ['CHAR', 'CHARACTER', 'VARCHAR', 'TEXT'];
+        return ['TEXT', 'VARCHAR', 'CHARACTER', 'CHAR'];
 
       case 'Attachment':
-        return ['TEXT', 'CHAR', 'CHARACTER', 'VARCHAR', 'text'];
+        return ['TEXT', 'CHAR', 'CHARACTER', 'VARCHAR'];
 
       case 'JSON':
         return ['TEXT'];
@@ -891,7 +918,7 @@ export class SnowflakeUi {
         return ['VARCHAR'];
 
       case 'URL':
-        return ['VARCHAR', 'TEXT'];
+        return ['TEXT', 'VARCHAR'];
 
       case 'Number':
         return [
@@ -983,6 +1010,7 @@ export class SnowflakeUi {
         ];
 
       case 'Formula':
+      case 'Button':
         return ['TEXT', 'VARCHAR'];
 
       case 'Rollup':
@@ -1016,7 +1044,6 @@ export class SnowflakeUi {
       case 'Geometry':
         return ['TEXT'];
 
-      case 'Button':
       default:
         return dbTypes;
     }
@@ -1034,6 +1061,118 @@ export class SnowflakeUi {
       'DATESTR',
     ];
   }
+
+  static getCurrentDateDefault(_col: Partial<ColumnType>) {
+    return null;
+  }
+
+  static isEqual(dataType1: string, dataType2: string) {
+    if (dataType1 === dataType2) return true;
+
+    const abstractType1 = this.getAbstractType({ dt: dataType1 });
+    const abstractType2 = this.getAbstractType({ dt: dataType2 });
+
+    if (
+      abstractType1 &&
+      abstractType1 === abstractType2 &&
+      ['integer', 'float'].includes(abstractType1)
+    )
+      return true;
+
+    return false;
+  }
+  //#endregion statics
+
+  //#region methods
+  getNewTableColumns(): readonly any[] {
+    return SnowflakeUi.getNewTableColumns();
+  }
+  getNewColumn(suffix: string): {
+    column_name: string;
+    dt: string;
+    dtx: string;
+    ct: string;
+    nrqd: boolean;
+    rqd: boolean;
+    ck: boolean;
+    pk: boolean;
+    un: boolean;
+    ai: boolean;
+    cdf: null;
+    clen: number;
+    np: number;
+    ns: number;
+    dtxp: string;
+    dtxs: string;
+    altered: number;
+    uidt: string;
+    uip: string;
+    uicn: string;
+  } {
+    return SnowflakeUi.getNewColumn(suffix);
+  }
+  getDefaultLengthForDatatype(type: string): number | string {
+    return SnowflakeUi.getDefaultLengthForDatatype(type);
+  }
+  getDefaultLengthIsDisabled(type: string) {
+    return SnowflakeUi.getDefaultLengthIsDisabled(type);
+  }
+  getDefaultValueForDatatype(type: string) {
+    return SnowflakeUi.getDefaultValueForDatatype(type);
+  }
+  getDefaultScaleForDatatype(type: any): string {
+    return SnowflakeUi.getDefaultScaleForDatatype(type);
+  }
+  colPropAIDisabled(col: ColumnType, columns: ColumnType[]): boolean {
+    return SnowflakeUi.colPropAIDisabled(col, columns);
+  }
+  colPropUNDisabled(col: ColumnType): boolean {
+    return SnowflakeUi.colPropUNDisabled(col);
+  }
+  onCheckboxChangeAI(col: ColumnType): void {
+    return SnowflakeUi.onCheckboxChangeAI(col);
+  }
+  showScale(columnObj: ColumnType): boolean {
+    return SnowflakeUi.showScale(columnObj);
+  }
+  removeUnsigned(columns: ColumnType[]): void {
+    return SnowflakeUi.removeUnsigned(columns);
+  }
+  columnEditable(colObj: ColumnType): boolean {
+    return SnowflakeUi.columnEditable(colObj);
+  }
+  onCheckboxChangeAU(col: ColumnType): void {
+    return SnowflakeUi.onCheckboxChangeAU(col);
+  }
+  colPropAuDisabled(col: ColumnType): boolean {
+    return SnowflakeUi.colPropAuDisabled(col);
+  }
+  getAbstractType(col: ColumnType): string {
+    return SnowflakeUi.getAbstractType(col);
+  }
+  getUIType(col: ColumnType): string {
+    return SnowflakeUi.getUIType(col);
+  }
+  getDataTypeForUiType(col: { uidt: UITypes }, idType?: IDType) {
+    return SnowflakeUi.getDataTypeForUiType(col, idType);
+  }
+  getDataTypeListForUiType(col: { uidt: UITypes }, idType?: IDType): string[] {
+    return SnowflakeUi.getDataTypeListForUiType(col, idType);
+  }
+  getUnsupportedFnList(): string[] {
+    return SnowflakeUi.getUnsupportedFnList();
+  }
+  getCurrentDateDefault(_col: Partial<ColumnType>) {
+    return SnowflakeUi.getCurrentDateDefault(_col);
+  }
+  isEqual(dataType1: string, dataType2: string): boolean {
+    return SnowflakeUi.isEqual(dataType1, dataType2);
+  }
+  adjustLengthAndScale(
+    _newColumn: Partial<ColumnType>,
+    _oldColumn?: ColumnType
+  ) {}
+  //#endregion methods
 }
 
 // module.exports = SnowflakeUiHelp;

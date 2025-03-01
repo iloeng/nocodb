@@ -8,15 +8,18 @@ import {
 } from '@nestjs/common';
 import { isSystemColumn, ViewTypes } from 'nocodb-sdk';
 import * as XLSX from 'xlsx';
-import { nocoExecute } from 'nc-help';
 import papaparse from 'papaparse';
+import { fromEntries } from '~/utils';
+import { nocoExecute } from '~/utils';
 import { NcError } from '~/helpers/catchError';
 import getAst from '~/helpers/getAst';
-import { serializeCellValue } from '~/modules/datas/helpers';
+import { serializeCellValue } from '~/helpers/dataHelpers';
 import { PublicDatasExportService } from '~/services/public-datas-export.service';
 import NcConnectionMgrv2 from '~/utils/common/NcConnectionMgrv2';
 import { Column, Model, Source, View } from '~/models';
 import { PublicApiLimiterGuard } from '~/guards/public-api-limiter.guard';
+import { TenantContext } from '~/decorators/tenant-context.decorator';
+import { NcContext } from '~/interface/config';
 
 @UseGuards(PublicApiLimiterGuard)
 @Controller()
@@ -30,16 +33,18 @@ export class PublicDatasExportController {
     '/api/v2/public/shared-view/:publicDataUuid/rows/export/excel',
   ])
   async exportExcel(
+    @TenantContext() context: NcContext,
     @Request() req,
     @Response() res,
     @Param('publicDataUuid') publicDataUuid: string,
   ) {
-    const view = await View.getByUUID(publicDataUuid);
+    const view = await View.getByUUID(context, publicDataUuid);
     if (!view) NcError.viewNotFound(publicDataUuid);
     if (
       view.type !== ViewTypes.GRID &&
       view.type !== ViewTypes.KANBAN &&
       view.type !== ViewTypes.GALLERY &&
+      view.type !== ViewTypes.CALENDAR &&
       view.type !== ViewTypes.MAP
     )
       NcError.notFound('Not found');
@@ -48,17 +53,41 @@ export class PublicDatasExportController {
       NcError.invalidSharedViewPassword();
     }
 
-    const model = await view.getModelWithInfo();
+    // check if download is allowed, in general it's called as CSV download
+    if (!view.meta?.allowCSVDownload) {
+      NcError.forbidden('Download is not allowed for this view');
+    }
 
-    await view.getColumns();
+    const model = await view.getModelWithInfo(context);
 
-    const { offset, dbRows, elapsed } = await this.getDbRows(model, view, req);
+    await view.getColumns(context);
+    const modelColumnMap = model.columns.reduce((mapObj, cur) => {
+      mapObj[cur.id] = cur;
+      return mapObj;
+    }, {});
 
-    const fields = req.query.fields as string[];
+    const { offset, dbRows, elapsed } = await this.getDbRows(
+      context,
+      model,
+      view,
+      req,
+    );
+
+    let fields = req.query.fields as string[];
+    const allowedColumns = view.columns
+      .filter((c) => c.show)
+      .map((k) => modelColumnMap[k.fk_column_id])
+      .filter((column) => !isSystemColumn(column) || view.show_system_fields)
+      .map((k) => k.title);
+    if (!fields || fields.length === 0 || !Array.isArray(fields)) {
+      fields = allowedColumns;
+    } else {
+      fields = fields.filter((field) => allowedColumns.includes(field));
+    }
 
     const data = XLSX.utils.json_to_sheet(
       dbRows.map((o: Record<string, any>) =>
-        Object.fromEntries(fields.map((f) => [f, o[f]])),
+        fromEntries(fields.map((f) => [f, o[f]])),
       ),
       { header: fields },
     );
@@ -66,8 +95,10 @@ export class PublicDatasExportController {
     const wb = XLSX.utils.book_new();
 
     XLSX.utils.book_append_sheet(wb, data, view.title);
-
-    const buf = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+    const buf = XLSX.write(wb, {
+      type: req.query.encoding === 'base64' ? 'base64' : 'buffer',
+      bookType: 'xlsx',
+    });
 
     res.set({
       'Access-Control-Expose-Headers': 'nc-export-offset',
@@ -84,8 +115,12 @@ export class PublicDatasExportController {
     '/api/v1/db/public/shared-view/:publicDataUuid/rows/export/csv',
     '/api/v2/public/shared-view/:publicDataUuid/rows/export/csv',
   ])
-  async exportCsv(@Request() req, @Response() res) {
-    const view = await View.getByUUID(req.params.publicDataUuid);
+  async exportCsv(
+    @TenantContext() context: NcContext,
+    @Request() req,
+    @Response() res,
+  ) {
+    const view = await View.getByUUID(context, req.params.publicDataUuid);
     const fields = req.query.fields;
 
     if (!view) NcError.viewNotFound(req.params.publicDataUuid);
@@ -93,6 +128,7 @@ export class PublicDatasExportController {
       view.type !== ViewTypes.GRID &&
       view.type !== ViewTypes.KANBAN &&
       view.type !== ViewTypes.GALLERY &&
+      view.type !== ViewTypes.CALENDAR &&
       view.type !== ViewTypes.MAP
     )
       NcError.notFound('Not found');
@@ -101,10 +137,20 @@ export class PublicDatasExportController {
       NcError.invalidSharedViewPassword();
     }
 
-    const model = await view.getModelWithInfo();
-    await view.getColumns();
+    // check if download is allowed
+    if (!view.meta?.allowCSVDownload) {
+      NcError.forbidden('Download is not allowed for this view');
+    }
 
-    const { offset, dbRows, elapsed } = await this.getDbRows(model, view, req);
+    const model = await view.getModelWithInfo(context);
+    await view.getColumns(context);
+
+    const { offset, dbRows, elapsed } = await this.getDbRows(
+      context,
+      model,
+      view,
+      req,
+    );
 
     const data = papaparse.unparse(
       {
@@ -140,7 +186,7 @@ export class PublicDatasExportController {
     res.send(data);
   }
 
-  async getDbRows(model, view: View, req) {
+  async getDbRows(@TenantContext() context: NcContext, model, view: View, req) {
     view.model.columns = view.columns
       .filter((c) => c.show)
       .map(
@@ -162,14 +208,14 @@ export class PublicDatasExportController {
       listArgs.sortArr = JSON.parse(listArgs.sortArrJson);
     } catch (e) {}
 
-    const source = await Source.get(model.source_id);
-    const baseModel = await Model.getBaseModelSQL({
+    const source = await Source.get(context, model.source_id);
+    const baseModel = await Model.getBaseModelSQL(context, {
       id: model.id,
       viewId: view?.id,
       dbDriver: await NcConnectionMgrv2.get(source),
     });
 
-    const { ast } = await getAst({
+    const { ast } = await getAst(context, {
       query: req.query,
       model,
       view,
@@ -207,7 +253,7 @@ export class PublicDatasExportController {
         const dbRow = { ...row };
 
         for (const column of view.model.columns) {
-          dbRow[column.title] = await serializeCellValue({
+          dbRow[column.title] = await serializeCellValue(context, {
             value: row[column.title],
             column,
             siteUrl: req.ncSiteUrl,

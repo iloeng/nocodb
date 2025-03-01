@@ -7,25 +7,35 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { Request } from 'express';
 import { GlobalGuard } from '~/guards/global/global.guard';
 import { Acl } from '~/middlewares/extract-ids/extract-ids.middleware';
 import { NcError } from '~/helpers/catchError';
 import { JobTypes } from '~/interface/Jobs';
 import { MetaApiLimiterGuard } from '~/guards/meta-api-limiter.guard';
+import { IJobsService } from '~/modules/jobs/jobs-service.interface';
+import { TenantContext } from '~/decorators/tenant-context.decorator';
+import { NcContext, NcRequest } from '~/interface/config';
 
 @Controller()
 @UseGuards(MetaApiLimiterGuard, GlobalGuard)
 export class MetaSyncController {
-  constructor(@Inject('JobsService') private readonly jobsService) {}
+  constructor(
+    @Inject('JobsService') private readonly jobsService: IJobsService,
+  ) {}
 
   @Post([
     '/api/v1/db/meta/projects/:baseId/meta-diff',
     '/api/v2/meta/bases/:baseId/meta-diff',
   ])
   @HttpCode(200)
-  @Acl('metaDiffSync')
-  async metaDiffSync(@Param('baseId') baseId: string, @Req() req: Request) {
+  @Acl('metaDiffSync', {
+    blockApiTokenAccess: true,
+  })
+  async metaDiffSync(
+    @TenantContext() context: NcContext,
+    @Param('baseId') baseId: string,
+    @Req() req: NcRequest,
+  ) {
     const jobs = await this.jobsService.jobList();
     const fnd = jobs.find(
       (j) => j.name === JobTypes.MetaSync && j.data.baseId === baseId,
@@ -36,6 +46,7 @@ export class MetaSyncController {
     }
 
     const job = await this.jobsService.add(JobTypes.MetaSync, {
+      context,
       baseId,
       sourceId: 'all',
       user: req.user,
@@ -54,11 +65,14 @@ export class MetaSyncController {
     '/api/v2/meta/bases/:baseId/meta-diff/:sourceId',
   ])
   @HttpCode(200)
-  @Acl('baseMetaDiffSync')
+  @Acl('baseMetaDiffSync', {
+    blockApiTokenAccess: true,
+  })
   async baseMetaDiffSync(
+    @TenantContext() context: NcContext,
     @Param('baseId') baseId: string,
     @Param('sourceId') sourceId: string,
-    @Req() req: Request,
+    @Req() req: NcRequest,
   ) {
     const jobs = await this.jobsService.jobList();
     const fnd = jobs.find(
@@ -73,6 +87,7 @@ export class MetaSyncController {
     }
 
     const job = await this.jobsService.add(JobTypes.MetaSync, {
+      context,
       baseId,
       sourceId,
       user: req.user,

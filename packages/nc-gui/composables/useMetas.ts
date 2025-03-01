@@ -31,6 +31,7 @@ export const useMetas = createSharedComposable(() => {
     force = false,
     skipIfCacheMiss = false,
     baseId?: string,
+    disableError = false,
   ): Promise<TableType | null> => {
     if (!tableIdOrTitle) return null
 
@@ -79,13 +80,8 @@ export const useMetas = createSharedComposable(() => {
       if (!force && metas.value[tableIdOrTitle]) {
         return metas.value[tableIdOrTitle]
       }
-
-      const modelId = (tables.find((t) => t.id === tableIdOrTitle) || tables.find((t) => t.title === tableIdOrTitle))?.id
-
-      if (!modelId) {
-        console.warn(`Table '${tableIdOrTitle}' is not found in the table list`)
-        return null
-      }
+      const modelId =
+        (tables.find((t) => t.id === tableIdOrTitle) || tables.find((t) => t.title === tableIdOrTitle))?.id || tableIdOrTitle
 
       const model = await $api.dbTable.read(modelId)
       metas.value = {
@@ -96,7 +92,9 @@ export const useMetas = createSharedComposable(() => {
 
       return model
     } catch (e: any) {
-      message.error(await extractSdkResponseErrorMsg(e))
+      if (!disableError) {
+        message.error(await extractSdkResponseErrorMsg(e))
+      }
     } finally {
       delete loadingState.value[tableIdOrTitle]
     }

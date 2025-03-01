@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import { ProjectRoles, type RoleLabels, WorkspaceUserRoles } from 'nocodb-sdk'
 
-import { extractEmail } from '~/helpers/parsers/parserHelpers'
+import { extractEmail } from '../../helpers/parsers/parserHelpers'
 
 const props = defineProps<{
   modelValue: boolean
@@ -16,6 +16,8 @@ const basesStore = useBases()
 
 const workspaceStore = useWorkspace()
 
+const { baseRoles, workspaceRoles } = useRoles()
+
 const { createProjectUser } = basesStore
 
 const { inviteCollaborator: inviteWsCollaborator } = workspaceStore
@@ -24,6 +26,9 @@ const dialogShow = useVModel(props, 'modelValue', emit)
 
 const orderedRoles = computed(() => {
   return props.type === 'base' ? ProjectRoles : WorkspaceUserRoles
+})
+const userRoles = computed(() => {
+  return props.type === 'base' ? baseRoles?.value : workspaceRoles?.value
 })
 
 const inviteData = reactive({
@@ -47,21 +52,49 @@ const emailBadges = ref<Array<string>>([])
 
 const allowedRoles = ref<[]>([])
 
+const disabledRoles = ref<[]>([])
+
+const isLoading = ref(false)
+
+const organizationStore = useOrganization()
+
+const { listWorkspaces } = organizationStore
+
+const { workspaces } = storeToRefs(organizationStore)
+
+const searchQuery = ref('')
+
+const workSpaceSelectList = computed<WorkspaceType[]>(() => {
+  return workspaces.value.filter((w: WorkspaceType) => w.title!.toLowerCase().includes(searchQuery.value.toLowerCase()))
+})
+
+const checked = reactive<{
+  [key: string]: boolean
+}>({})
+
+const selectedWorkspaces = computed<WorkspaceType[]>(() => {
+  return workSpaceSelectList.value.filter((ws: WorkspaceType) => checked[ws.id!])
+})
+
 const focusOnDiv = () => {
   focusRef.value?.focus()
   isDivFocused.value = true
 }
 
+const { t } = useI18n()
+
 watch(dialogShow, async (newVal) => {
   if (newVal) {
     try {
-      // todo: enable after discussing with anbu
-      // const currentRoleIndex = Object.values(orderedRoles.value).findIndex(
-      //   (role) => userRoles.value && Object.keys(userRoles.value).includes(role),
-      // )
-      // if (currentRoleIndex !== -1) {
-      allowedRoles.value = Object.values(orderedRoles.value) // .slice(currentRoleIndex + 1)
-      // }
+      const rolesArr = Object.values(orderedRoles.value)
+      const currentRoleIndex = rolesArr.findIndex((role) => userRoles.value && Object.keys(userRoles.value).includes(role))
+      if (currentRoleIndex !== -1) {
+        allowedRoles.value = rolesArr.slice(currentRoleIndex)
+        disabledRoles.value = rolesArr.slice(0, currentRoleIndex)
+      } else {
+        allowedRoles.value = rolesArr
+        disabledRoles.value = []
+      }
     } catch (e: any) {
       message.error(await extractSdkResponseErrorMsg(e))
     }
@@ -93,7 +126,7 @@ const insertOrUpdateString = (str: string) => {
   emailBadges.value.push(str)
 }
 
-const emailInputValidation = (input: string, isBulkEmailCopyPaste: boolean = false): boolean => {
+const emailInputValidation = (input: string, isBulkEmailCopyPaste = false): boolean => {
   if (!input.length) {
     if (isBulkEmailCopyPaste) return false
 
@@ -218,10 +251,9 @@ const onPaste = (e: ClipboardEvent) => {
   inviteData.email = ''
 }
 
-const workSpaces = ref<NcWorkspace[]>([])
-
 const inviteCollaborator = async () => {
   try {
+    isLoading.value = true
     const payloadData = singleEmailValue.value || emailBadges.value.join(',')
     if (!payloadData.includes(',')) {
       const validationStatus = validateEmail(payloadData)
@@ -239,12 +271,12 @@ const inviteCollaborator = async () => {
       await inviteWsCollaborator(payloadData, inviteData.roles, props.workspaceId)
     } else if (props.type === 'organization') {
       // TODO: Add support for Bulk Workspace Invite
-      for (const workspace of workSpaces.value) {
+      for (const workspace of selectedWorkspaces.value) {
         await inviteWsCollaborator(payloadData, inviteData.roles, workspace.id)
       }
     }
 
-    message.success('Invitation sent successfully')
+    message.success(t('msg.info.inviteSent'))
     inviteData.email = ''
     emailBadges.value = []
     dialogShow.value = false
@@ -252,32 +284,17 @@ const inviteCollaborator = async () => {
     message.error(await extractSdkResponseErrorMsg(e))
   } finally {
     singleEmailValue.value = ''
+    isLoading.value = false
   }
 }
 
-const organizationStore = useOrganization()
-
-const { listWorkspaces } = organizationStore
-
-const { workspaces } = storeToRefs(organizationStore)
-
-const workSpaceSelectList = computed(() => {
-  return workspaces.value.filter((w) => !workSpaces.value.find((ws) => ws.id === w.id))
-})
-
-const addToList = (workspaceId: string) => {
-  workSpaces.value.push(workspaces.value.find((w) => w.id === workspaceId)!)
-}
-const removeWorkspace = (workspaceId: string) => {
-  workSpaces.value = workSpaces.value.filter((w) => w.id !== workspaceId)
-}
+const isOrgSelectMenuOpen = ref(false)
 
 onMounted(async () => {
   if (props.type === 'organization') {
     await listWorkspaces()
   }
 })
-
 const onRoleChange = (role: keyof typeof RoleLabels) => (inviteData.roles = role as ProjectRoles | WorkspaceUserRoles)
 </script>
 
@@ -291,7 +308,7 @@ const onRoleChange = (role: keyof typeof RoleLabels) => (inviteData.roles = role
     @keydown.esc="dialogShow = false"
   >
     <template #header>
-      <div class="flex flex-row items-center gap-x-2">
+      <div class="flex flex-row text-2xl font-bold items-center gap-x-2">
         {{
           type === 'organization'
             ? $t('labels.addMembersToOrganization')
@@ -331,6 +348,7 @@ const onRoleChange = (role: keyof typeof RoleLabels) => (inviteData.roles = role
               id="email"
               ref="focusRef"
               v-model="inviteData.email"
+              :disabled="isLoading"
               :placeholder="$t('activity.enterEmail')"
               class="w-full min-w-36 outline-none px-2"
               data-testid="email-input"
@@ -343,6 +361,7 @@ const onRoleChange = (role: keyof typeof RoleLabels) => (inviteData.roles = role
             :description="false"
             :on-role-change="onRoleChange"
             :role="inviteData.roles"
+            :disabled-roles="disabledRoles"
             :roles="allowedRoles"
             class="!min-w-[152px] nc-invite-role-selector"
             size="lg"
@@ -354,23 +373,71 @@ const onRoleChange = (role: keyof typeof RoleLabels) => (inviteData.roles = role
         }}</span>
 
         <template v-if="type === 'organization'">
-          <NcSelect :placeholder="$t('labels.selectWorkspace')" size="middle" @change="addToList">
-            <a-select-option v-for="workspace in workSpaceSelectList" :key="workspace.id" :value="workspace.id">
-              {{ workspace.title }}
-            </a-select-option>
-          </NcSelect>
+          <NcDropdown v-model:visible="isOrgSelectMenuOpen">
+            <NcButton class="!justify-between" full-width size="medium" type="secondary">
+              <div
+                :class="{
+                  '!text-gray-600': selectedWorkspaces.length > 0,
+                }"
+                class="flex text-gray-500 justify-between items-center w-full"
+              >
+                <NcTooltip class="!max-w-130 truncate" show-on-truncate-only>
+                  <span class="">
+                    {{
+                      selectedWorkspaces.length > 0
+                        ? selectedWorkspaces.map((w) => w.title).join(', ')
+                        : '-select workspaces to invite to-'
+                    }}
+                  </span>
+                  <template #title>
+                    {{
+                      selectedWorkspaces.length > 0
+                        ? selectedWorkspaces.map((w) => w.title).join(', ')
+                        : '-select workspaces to invite to-'
+                    }}
+                  </template>
+                </NcTooltip>
 
-          <div class="flex flex-wrap gap-2">
-            <NcBadge v-for="workspace in workSpaces" :key="workspace.id">
-              <div class="px-2 flex gap-2 items-center py-1">
-                <GeneralWorkspaceIcon :workspace="workspace" hide-label size="small" />
-                <span class="text-gray-600">
-                  {{ workspace.title }}
-                </span>
-                <component :is="iconMap.close" class="w-3 h-3" @click="removeWorkspace(workspace.id)" />
+                <component :is="iconMap.chevronDown" />
               </div>
-            </NcBadge>
-          </div>
+            </NcButton>
+            <template #overlay>
+              <div class="py-2">
+                <div class="mx-2">
+                  <a-input
+                    v-model:value="searchQuery"
+                    :class="{
+                      '!border-brand-500': searchQuery.length > 0,
+                    }"
+                    class="!rounded-lg !h-8 !ring-0 !placeholder:text-gray-500 !border-gray-200 !px-4"
+                    data-testid="nc-ws-search"
+                    placeholder="Search workspace"
+                  >
+                    <template #prefix>
+                      <component :is="iconMap.search" class="h-4 w-4 mr-1 text-gray-500" />
+                    </template>
+                  </a-input>
+                </div>
+
+                <div class="flex flex-col max-h-64 overflow-y-auto nc-scrollbar-md mt-2 px-2">
+                  <div
+                    v-for="ws in workSpaceSelectList"
+                    :key="ws.id"
+                    class="px-2 cursor-pointer hover:bg-gray-100 rounded-lg h-9.5 py-2 w-full flex gap-2"
+                    @click="checked[ws.id!] = !checked[ws.id!]"
+                  >
+                    <div class="flex gap-2 capitalize items-center">
+                      <GeneralWorkspaceIcon :workspace="ws" size="medium" />
+                      {{ ws.title }}
+                    </div>
+                    <div class="flex-1" />
+                    <NcCheckbox v-model:checked="checked[ws.id!]" size="large" />
+                  </div>
+                </div>
+              </div>
+            </template>
+            />
+          </NcDropdown>
         </template>
       </div>
     </div>
@@ -378,7 +445,8 @@ const onRoleChange = (role: keyof typeof RoleLabels) => (inviteData.roles = role
       <div class="flex gap-2">
         <NcButton type="secondary" @click="dialogShow = false"> {{ $t('labels.cancel') }} </NcButton>
         <NcButton
-          :disabled="isInviteButtonDisabled || emailValidation.isError"
+          :disabled="isInviteButtonDisabled || emailValidation.isError || isLoading"
+          :loading="isLoading"
           size="medium"
           type="primary"
           class="nc-invite-btn"

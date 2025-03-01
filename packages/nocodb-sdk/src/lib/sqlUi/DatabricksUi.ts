@@ -1,5 +1,7 @@
 import UITypes from '../UITypes';
 import { IDType } from './index';
+import { ColumnType } from '~/lib';
+import { SqlUi } from './SqlUI.types';
 
 const dbTypes = [
   'BIGINT',
@@ -19,7 +21,8 @@ const dbTypes = [
   'TINYINT',
 ];
 
-export class DatabricksUi {
+export class DatabricksUi implements SqlUi {
+  //#region statics
   static getNewTableColumns() {
     return [
       {
@@ -58,7 +61,7 @@ export class DatabricksUi {
         un: false,
         ai: false,
         cdf: null,
-        clen: 45,
+        clen: null,
         np: null,
         ns: null,
         dtxp: '',
@@ -160,6 +163,30 @@ export class DatabricksUi {
         uicn: '',
         system: true,
       },
+      {
+        column_name: 'nc_order',
+        title: 'nc_order',
+        dt: 'decimal',
+        dtx: 'specificType',
+        ct: 'decimal(38,18)',
+        nrqd: true,
+        rqd: false,
+        ck: false,
+        pk: false,
+        un: false,
+        ai: false,
+        cdf: null,
+        clen: null,
+        np: 38,
+        ns: 18,
+        dtxp: '38,18',
+        dtxs: '',
+        altered: 1,
+        uidt: UITypes.Order,
+        uip: '',
+        uicn: '',
+        system: true,
+      },
     ];
   }
 
@@ -176,7 +203,7 @@ export class DatabricksUi {
       un: false,
       ai: false,
       cdf: null,
-      clen: 45,
+      clen: null,
       np: null,
       ns: null,
       dtxp: '',
@@ -531,7 +558,7 @@ export class DatabricksUi {
     }
   }
 
-  static getDataTypeForUiType(col: { uidt: UITypes; }) {
+  static getDataTypeForUiType(col: { uidt: UITypes }) {
     const colProp: any = {};
     switch (col.uidt) {
       case 'ID':
@@ -660,6 +687,9 @@ export class DatabricksUi {
       case 'JSON':
         colProp.dt = 'string';
         break;
+      case 'Order':
+        colProp.dt = 'decimal';
+        break;
       default:
         colProp.dt = 'string';
         break;
@@ -667,7 +697,7 @@ export class DatabricksUi {
     return colProp;
   }
 
-  static getDataTypeListForUiType(col: { uidt: UITypes; }, idType?: IDType) {
+  static getDataTypeListForUiType(col: { uidt: UITypes }, idType?: IDType) {
     switch (col.uidt) {
       case 'ID':
         if (idType === 'AG') {
@@ -696,9 +726,7 @@ export class DatabricksUi {
         return ['string'];
 
       case 'Checkbox':
-        return [
-          'boolean',
-        ];
+        return ['boolean'];
 
       case 'MultiSelect':
         return ['string'];
@@ -707,14 +735,10 @@ export class DatabricksUi {
         return ['string'];
 
       case 'Year':
-        return [
-          'int',
-        ];
+        return ['int'];
 
       case 'Time':
-        return [
-          'string',
-        ];
+        return ['string'];
 
       case 'PhoneNumber':
       case 'Email':
@@ -724,43 +748,32 @@ export class DatabricksUi {
         return ['string'];
 
       case 'Number':
-        return [
-          'int',
-        ];
+        return ['int'];
 
       case 'Decimal':
         return ['decimal', 'float', 'double'];
 
       case 'Currency':
-        return [
-          'decimal',
-        ];
+        return ['decimal'];
 
       case 'Percent':
-        return [
-          'decimal',
-        ];
+        return ['decimal'];
 
       case 'Duration':
-        return [
-          'decimal',
-        ];
+        return ['decimal'];
 
       case 'Rating':
-        return [
-          'int',
-        ];
+        return ['int'];
 
       case 'Formula':
+      case 'Button':
         return ['string'];
 
       case 'Rollup':
         return ['string'];
 
       case 'Count':
-        return [
-          'int',
-        ];
+        return ['int'];
 
       case 'Lookup':
         return ['string'];
@@ -774,9 +787,7 @@ export class DatabricksUi {
         return ['datetime'];
 
       case 'AutoNumber':
-        return [
-          'int',
-        ];
+        return ['int'];
 
       case 'Barcode':
         return ['string'];
@@ -786,7 +797,6 @@ export class DatabricksUi {
       case 'JSON':
         return ['string'];
 
-      case 'Button':
       default:
         return dbTypes;
     }
@@ -813,4 +823,116 @@ export class DatabricksUi {
       'HOUR',
     ];
   }
+
+  static getCurrentDateDefault(_col: Partial<ColumnType>) {
+    return null;
+  }
+
+  static isEqual(dataType1: string, dataType2: string) {
+    if (dataType1 === dataType2) return true;
+
+    const abstractType1 = this.getAbstractType({ dt: dataType1 });
+    const abstractType2 = this.getAbstractType({ dt: dataType2 });
+
+    if (
+      abstractType1 &&
+      abstractType1 === abstractType2 &&
+      ['integer', 'float'].includes(abstractType1)
+    )
+      return true;
+
+    return false;
+  }
+  //#endregion statics
+
+  //#region methods
+  getNewTableColumns(): readonly any[] {
+    return DatabricksUi.getNewTableColumns();
+  }
+  getNewColumn(suffix: string): {
+    column_name: string;
+    dt: string;
+    dtx: string;
+    ct: string;
+    nrqd: boolean;
+    rqd: boolean;
+    ck: boolean;
+    pk: boolean;
+    un: boolean;
+    ai: boolean;
+    cdf: null;
+    clen: number;
+    np: number;
+    ns: number;
+    dtxp: string;
+    dtxs: string;
+    altered: number;
+    uidt: string;
+    uip: string;
+    uicn: string;
+  } {
+    return DatabricksUi.getNewColumn(suffix);
+  }
+  getDefaultLengthForDatatype(type: string): number | string {
+    return DatabricksUi.getDefaultLengthForDatatype(type);
+  }
+  getDefaultLengthIsDisabled(type: string) {
+    return DatabricksUi.getDefaultLengthIsDisabled(type);
+  }
+  getDefaultValueForDatatype(type: string) {
+    return DatabricksUi.getDefaultValueForDatatype(type);
+  }
+  getDefaultScaleForDatatype(type: any): string {
+    return DatabricksUi.getDefaultScaleForDatatype(type);
+  }
+  colPropAIDisabled(col: ColumnType, columns: ColumnType[]): boolean {
+    return DatabricksUi.colPropAIDisabled(col, columns);
+  }
+  colPropUNDisabled(col: ColumnType): boolean {
+    return DatabricksUi.colPropUNDisabled(col);
+  }
+  onCheckboxChangeAI(col: ColumnType): void {
+    return DatabricksUi.onCheckboxChangeAI(col);
+  }
+  showScale(columnObj: ColumnType): boolean {
+    return DatabricksUi.showScale(columnObj);
+  }
+  removeUnsigned(columns: ColumnType[]): void {
+    return DatabricksUi.removeUnsigned(columns);
+  }
+  columnEditable(colObj: ColumnType): boolean {
+    return DatabricksUi.columnEditable(colObj);
+  }
+  onCheckboxChangeAU(col: ColumnType): void {
+    return DatabricksUi.onCheckboxChangeAU(col);
+  }
+  colPropAuDisabled(col: ColumnType): boolean {
+    return DatabricksUi.colPropAuDisabled(col);
+  }
+  getAbstractType(col: ColumnType): string {
+    return DatabricksUi.getAbstractType(col);
+  }
+  getUIType(col: ColumnType): string {
+    return DatabricksUi.getUIType(col);
+  }
+  getDataTypeForUiType(col: { uidt: UITypes }, _idType?: IDType) {
+    return DatabricksUi.getDataTypeForUiType(col);
+  }
+  getDataTypeListForUiType(col: { uidt: UITypes }, idType?: IDType): string[] {
+    return DatabricksUi.getDataTypeListForUiType(col, idType);
+  }
+  getUnsupportedFnList(): string[] {
+    return DatabricksUi.getUnsupportedFnList();
+  }
+  getCurrentDateDefault(_col: Partial<ColumnType>) {
+    return DatabricksUi.getCurrentDateDefault(_col);
+  }
+  isEqual(dataType1: string, dataType2: string): boolean {
+    return DatabricksUi.isEqual(dataType1, dataType2);
+  }
+  adjustLengthAndScale(
+    _newColumn: Partial<ColumnType>,
+    _oldColumn?: ColumnType
+  ) {}
+  //#endregion methods
 }
